@@ -119,9 +119,9 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       let volRows = []
       const woIds = recentWk.map((w) => w.id)
       if (woIds.length) {
-        const { data: weRows } = await supabase.from('workout_exercises').select('workout_id, set_log').in('workout_id', woIds)
+        const { data: weRows } = await supabase.from('workout_exercises').select('workout_id, name, set_log').in('workout_id', woIds)
         const dateById = Object.fromEntries(recentWk.map((w) => [w.id, w.performed_on]))
-        volRows = (weRows || []).map((r) => ({ date: dateById[r.workout_id], setLog: Array.isArray(r.set_log) ? r.set_log : [] }))
+        volRows = (weRows || []).map((r) => ({ date: dateById[r.workout_id], name: r.name, setLog: Array.isArray(r.set_log) ? r.set_log : [] }))
       }
       if (!active) return
       setVolumeRows(volRows)
@@ -133,6 +133,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       setExercises(exs)
       setWorkoutId(wid)
       setSessionTitle(stitle)
+      if (wid && reloadKey === 0) setTab('train') // open straight into the active session
+
       setWeightHistory((wRes.data || []).map((r) => Number(r.weight)))
       setCatalog(catRes.data || [])
       setRecentDates((recRes.data || []).map((r) => r.performed_on))
@@ -251,6 +253,17 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     await supabase.from('weight_log').insert({ user_id: uid, weight: w })
   }
 
+  // ---- guided session: advance exercise by exercise ----
+  const goPrev = () => setSelected((s) => Math.max(0, s - 1))
+  const goNext = () => setSelected((s) => Math.min(exercises.length - 1, s + 1))
+  const primaryCta = async () => {
+    const cur = exercises[selected]
+    if (cur && !cur.completed) await toggle(selected)
+    const pending = exercises.map((e, i) => ({ i, done: i === selected ? true : e.completed })).filter((x) => !x.done).map((x) => x.i)
+    if (pending.length === 0) { setOverlay('done'); return }
+    setSelected(pending.find((i) => i > selected) ?? pending[0])
+  }
+
   const goTab = (t) => { setTab(t); setOverlay(null) }
   const openStart = () => setOverlay('start')
   const openDetail = (i) => { setSelected(i); setOverlay('detail') }
@@ -316,6 +329,16 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const sel = exercises[selected] || exercises[0] || null
   const selSetLog = sel ? (sel.setLog && sel.setLog.length ? sel.setLog : buildSetLog(sel.sets, sel.reps, sel.weight)) : []
   const cellInput = { width: 74, boxSizing: 'border-box', background: '#0e0e0e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 6px', color: '#fff', fontFamily: c.bebas, fontSize: 18, textAlign: 'center', outline: 'none' }
+  const otherPending = exercises.filter((e, i) => i !== selected && !e.completed).length
+  const curDone = !!(sel && sel.completed)
+  const ctaLabel = !curDone
+    ? (otherPending === 0 ? '✓ TERMINER LA SÉANCE' : '✓ TERMINER & SUIVANT')
+    : (otherPending === 0 ? 'SÉANCE TERMINÉE ▸' : 'EXERCICE SUIVANT ▸')
+  const numAt = (v) => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? null : n }
+  const sessionVolume = exercises.reduce((tot, e) => tot + (e.setLog || []).reduce((s, st) => {
+    const w = numAt(st.weight), r = numAt(st.reps); return s + (w != null && r != null ? w * r : 0)
+  }, 0), 0)
+  const doneCount = exercises.filter((e) => e.completed).length
 
   const hist = weightHistory
   const bodyWeight = hist.length ? hist[hist.length - 1] : (profile.bodyweight || 0)
@@ -372,6 +395,21 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   }))
   const volThisWeek = volBars[volBars.length - 1].vol
   const anyVol = volBars.some((b) => b.vol > 0)
+
+  // best estimated 1RM per exercise (Epley) from logged sets
+  const exBest = {}
+  for (const r of volumeRows) {
+    for (const st of r.setLog || []) {
+      const w = parseFloat(String(st.weight).replace(',', '.'))
+      const rp = parseFloat(String(st.reps))
+      if (isNaN(w) || isNaN(rp) || w <= 0 || rp <= 0) continue
+      const e1 = w * (1 + rp / 30)
+      if (!exBest[r.name] || e1 > exBest[r.name].e1) exBest[r.name] = { e1, w, rp }
+    }
+  }
+  const records = Object.entries(exBest)
+    .map(([n, v]) => ({ name: n, e1: Math.round(v.e1), w: v.w, rp: v.rp }))
+    .sort((a, b) => b.e1 - a.e1).slice(0, 6)
 
   const dateSet = new Set(recentDates)
   const streak = computeStreak(dateSet)
@@ -629,6 +667,26 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                 )}
               </div>
 
+              {records.length > 0 && (
+                <>
+                  <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1, marginBottom: 12 }}>RECORDS · 1RM ESTIMÉ</div>
+                  <div style={{ background: '#141414', border: '1px solid ' + c.hair, borderRadius: 18, overflow: 'hidden', marginBottom: 24 }}>
+                    {records.map((r, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', borderBottom: i < records.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ font: "600 15px 'Barlow Condensed'", letterSpacing: 0.3 }}>{r.name}</div>
+                          <div style={{ font: "500 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint, marginTop: 1 }}>MEILLEUR : {r.w} KG × {r.rp}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontFamily: c.bebas, fontSize: 24, color: accent, lineHeight: 0.9 }}>{r.e1}<span style={{ fontSize: 13, color: c.faint45 }}> KG</span></div>
+                          <div style={{ font: "600 8px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>1RM EST.</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
                 <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1 }}>PHOTOS DE PROGRÈS</div>
                 <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TOUCHE POUR AJOUTER</div>
@@ -721,6 +779,11 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
             </div>
 
             <div style={{ padding: '22px 20px 130px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div onClick={goPrev} style={{ width: 34, height: 34, borderRadius: '50%', background: '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 22, color: '#fff', cursor: 'pointer', opacity: selected > 0 ? 1 : 0.3 }}>‹</div>
+                <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint }}>EXERCICE {selected + 1} / {total}</div>
+                <div onClick={goNext} style={{ width: 34, height: 34, borderRadius: '50%', background: '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 22, color: '#fff', cursor: 'pointer', opacity: selected < total - 1 ? 1 : 0.3 }}>›</div>
+              </div>
               <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: accent }}>{sel.group}</div>
               <div style={{ fontFamily: c.bebas, fontSize: 48, lineHeight: 0.86, letterSpacing: 0.5, marginTop: 4 }}>{sel.name}</div>
 
@@ -785,9 +848,27 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
               <div onClick={() => removeExercise(selected)} style={{ marginTop: 26, textAlign: 'center', font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: '#FF5A3C', cursor: 'pointer' }}>RETIRER DE LA SÉANCE</div>
             </div>
 
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 20px 30px', background: 'linear-gradient(transparent,#0A0A0A 30%)' }}>
-              <div onClick={() => toggle(selected)} style={{ background: sel.completed ? '#1c1c1c' : accent, color: sel.completed ? accent : '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>{sel.completed ? '✓ TERMINÉ' : 'MARQUER COMME FAIT'}</div>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '14px 20px 26px', background: 'linear-gradient(transparent,#0A0A0A 28%)' }}>
+              <div onClick={primaryCta} style={{ background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>{ctaLabel}</div>
+              {curDone && <div onClick={() => toggle(selected)} style={{ marginTop: 8, textAlign: 'center', font: "700 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, cursor: 'pointer' }}>DÉCOCHER CET EXERCICE</div>}
             </div>
+          </div>
+        )}
+
+        {/* ============ SÉANCE TERMINÉE ============ */}
+        {overlay === 'done' && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 92, background: '#0A0A0A', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 30, textAlign: 'center', animation: 'overlayIn .25s' }}>
+            <div style={{ width: 84, height: 84, borderRadius: '50%', background: accent, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24, animation: 'popIn .4s' }}>
+              <svg width="40" height="40" viewBox="0 0 18 18"><path d="M3 9.5l4 4 8-9" fill="none" stroke="#000" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </div>
+            <div style={{ fontFamily: c.bebas, fontSize: 52, lineHeight: 0.9, letterSpacing: 1 }}>SÉANCE<br />TERMINÉE</div>
+            <div style={{ font: "600 13px 'Barlow Condensed'", letterSpacing: 1, color: c.faint, marginTop: 14 }}>{title}</div>
+            <div style={{ display: 'flex', gap: 28, marginTop: 26 }}>
+              <div><div style={{ fontFamily: c.bebas, fontSize: 40, color: accent }}>{doneCount}/{total}</div><div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>EXERCICES</div></div>
+              <div><div style={{ fontFamily: c.bebas, fontSize: 40 }}>{(sessionVolume / 1000).toFixed(1)}<span style={{ fontSize: 20, color: c.faint45 }}> T</span></div><div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>VOLUME</div></div>
+            </div>
+            <div onClick={() => { setOverlay(null); setTab('home') }} style={{ marginTop: 36, background: accent, color: '#000', borderRadius: 30, padding: '15px 44px', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>TERMINER ▸</div>
+            <div onClick={() => { setOverlay(null); setTab('train') }} style={{ marginTop: 14, font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, cursor: 'pointer' }}>REVOIR LA SÉANCE</div>
           </div>
         )}
 
