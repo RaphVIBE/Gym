@@ -260,6 +260,24 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     await supabase.from('weight_log').insert({ user_id: uid, weight: w })
   }
 
+  // ---- session-level actions ----
+  const resetSession = async () => {
+    setOverlay(null)
+    const cleared = exercises.map((e) => ({ ...e, completed: false, setLog: (e.setLog || []).map((s) => ({ ...s, done: false })) }))
+    setExercises(cleared)
+    await Promise.all(cleared.filter((e) => e.woExId).map((e) =>
+      supabase.from('workout_exercises').update({ completed: false, set_log: e.setLog }).eq('id', e.woExId),
+    ))
+  }
+  const deleteSession = async () => {
+    if (typeof window !== 'undefined' && !window.confirm('Supprimer la séance du jour ? Les données saisies seront perdues.')) return
+    const wid = workoutId
+    setOverlay(null)
+    setWorkoutId(null); setSessionTitle(''); setExercises([])
+    setRecentDates((d) => d.filter((x) => x !== todayStr))
+    if (wid) await supabase.from('workouts').delete().eq('id', wid)
+  }
+
   // ---- guided session: advance exercise by exercise ----
   const goPrev = () => setSelected((s) => Math.max(0, s - 1))
   const goNext = () => setSelected((s) => Math.min(exercises.length - 1, s + 1))
@@ -514,7 +532,10 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
           {tab === 'train' && (
             <div style={{ padding: '60px 0 130px', animation: 'fadeUp .4s' }}>
               <div style={{ padding: '0 20px' }}>
-                <div style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}>{dateLabel()} · AUJOURD'HUI</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}>{dateLabel()} · AUJOURD'HUI</div>
+                  {started && <div onClick={() => setOverlay('sessionMenu')} style={{ cursor: 'pointer', padding: '0 6px', color: c.faint, fontSize: 24, lineHeight: 1, letterSpacing: 1 }}>⋯</div>}
+                </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 8 }}>
                   <div style={{ fontFamily: c.bebas, fontSize: 54, lineHeight: 0.82 }}>{started ? titleLines.map((l, k) => <span key={k}>{l}{k < titleLines.length - 1 && <br />}</span>) : 'SÉANCE'}</div>
                   {started && (
@@ -591,7 +612,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
 
                   <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div onClick={openAdd} style={{ border: '1.5px dashed rgba(255,255,255,0.2)', borderRadius: 16, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>+ AJOUTER UN EXERCICE</div>
-                    <div onClick={openStart} style={{ textAlign: 'center', font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, cursor: 'pointer', padding: 4 }}>CHANGER DE SÉANCE</div>
+                    <div onClick={() => setOverlay('done')} style={{ background: accent, color: '#000', borderRadius: 30, padding: 15, textAlign: 'center', fontFamily: c.bebas, fontSize: 21, letterSpacing: 1.5, cursor: 'pointer' }}>FINIR LA SÉANCE ▸</div>
                   </div>
                 </>
               )}
@@ -858,6 +879,19 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
             <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '14px 20px 26px', background: 'linear-gradient(transparent,#0A0A0A 28%)' }}>
               <div onClick={primaryCta} style={{ background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>{ctaLabel}</div>
               {curDone && <div onClick={() => toggle(selected)} style={{ marginTop: 8, textAlign: 'center', font: "700 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, cursor: 'pointer' }}>DÉCOCHER CET EXERCICE</div>}
+            </div>
+          </div>
+        )}
+
+        {/* ============ MENU SÉANCE (⋯) ============ */}
+        {overlay === 'sessionMenu' && (
+          <div onClick={closeOverlay} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end', animation: 'overlayIn .25s' }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '24px 20px 40px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
+              <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 14px' }} />
+              <div style={{ fontFamily: c.bebas, fontSize: 28, letterSpacing: 0.5, marginBottom: 8 }}>{sessionTitle || 'SÉANCE'}</div>
+              <MenuRow label="REMETTRE À ZÉRO" onClick={resetSession} accent={accent} />
+              <MenuRow label="CHANGER DE SÉANCE" onClick={() => setOverlay('start')} accent={accent} />
+              <MenuRow label="SUPPRIMER LA SÉANCE" onClick={deleteSession} danger />
             </div>
           </div>
         )}
