@@ -63,6 +63,13 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const [catalog, setCatalog] = useState([])
   const [recentDates, setRecentDates] = useState([])
   const [volumeRows, setVolumeRows] = useState([])
+  const [copied, setCopied] = useState(false)
+
+  const inviteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://belgium.netlify.app'
+  const inviteMsg = `Rejoins-moi sur Pulse Gym, mon app d'entraînement 💪\n${inviteUrl}`
+  const shareWhatsApp = () => window.open('https://wa.me/?text=' + encodeURIComponent(inviteMsg), '_blank', 'noopener')
+  const shareEmail = () => { window.location.href = 'mailto:?subject=' + encodeURIComponent('Rejoins-moi sur Pulse Gym') + '&body=' + encodeURIComponent(inviteMsg) }
+  const copyLink = async () => { try { await navigator.clipboard.writeText(inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 1600) } catch { /* clipboard unavailable */ } }
 
   const todayStr = localDateStr()
   const wd = todayWeekday()
@@ -933,7 +940,34 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
               {started && <MenuRow label="CHANGER DE SÉANCE" onClick={() => setOverlay('start')} accent={accent} />}
               <MenuRow label="MODIFIER LE PROGRAMME" onClick={() => { setOverlay(null); setShowEditor(true) }} accent={accent} />
               <MenuRow label="REGÉNÉRER AVEC LE COACH" onClick={() => { setOverlay(null); onReonboard() }} accent={accent} />
+              <MenuRow label="INVITER UN AMI" onClick={() => setOverlay('invite')} accent={accent} />
               <MenuRow label="DÉCONNEXION" onClick={onSignOut} danger />
+            </div>
+          </div>
+        )}
+
+        {/* ============ INVITER UN AMI ============ */}
+        {overlay === 'invite' && (
+          <div onClick={closeOverlay} style={{ position: 'absolute', inset: 0, zIndex: 92, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end', animation: 'overlayIn .25s' }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '24px 20px 40px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
+              <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 18px' }} />
+              <div style={{ fontFamily: c.bebas, fontSize: 32, letterSpacing: 0.5 }}>INVITER UN AMI</div>
+              <div style={{ font: "500 13px 'Barlow Condensed'", letterSpacing: 0.3, color: c.faint, marginTop: 4, marginBottom: 18 }}>Partage Pulse Gym et entraînez-vous ensemble.</div>
+
+              <div onClick={copyLink} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#0e0e0e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', marginBottom: 16, cursor: 'pointer' }}>
+                <div style={{ flex: 1, minWidth: 0, font: "500 14px 'Barlow Condensed'", letterSpacing: 0.3, color: 'rgba(255,255,255,0.8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inviteUrl.replace(/^https?:\/\//, '')}</div>
+                <div style={{ flexShrink: 0, fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, color: copied ? accent : 'rgba(255,255,255,0.6)' }}>{copied ? 'COPIÉ ✓' : 'COPIER'}</div>
+              </div>
+
+              <div onClick={shareWhatsApp} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#25D366', color: '#000', borderRadius: 30, padding: 15, marginBottom: 10, cursor: 'pointer' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="#000"><path d="M12 2a10 10 0 0 0-8.5 15.2L2 22l4.9-1.5A10 10 0 1 0 12 2zm0 18a8 8 0 0 1-4.1-1.1l-.3-.2-2.9.9.9-2.8-.2-.3A8 8 0 1 1 12 20zm4.6-5.9c-.3-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.6.1a6.6 6.6 0 0 1-1.9-1.2 7.3 7.3 0 0 1-1.4-1.7c-.1-.3 0-.4.1-.6l.4-.5c.1-.2.2-.3.3-.5s0-.4 0-.5-.6-1.4-.8-2-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3A2.8 2.8 0 0 0 6 8.4a4.9 4.9 0 0 0 1 2.6 11.2 11.2 0 0 0 4.3 3.8c.6.3 1.1.4 1.5.5a3.6 3.6 0 0 0 1.6.1c.5-.1 1.5-.6 1.7-1.2s.2-1.1.2-1.2-.2-.2-.4-.3z" /></svg>
+                <span style={{ fontFamily: c.bebas, fontSize: 20, letterSpacing: 1 }}>PARTAGER VIA WHATSAPP</span>
+              </div>
+
+              <div onClick={shareEmail} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', borderRadius: 30, padding: 15, cursor: 'pointer' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
+                <span style={{ fontFamily: c.bebas, fontSize: 20, letterSpacing: 1 }}>PARTAGER PAR E-MAIL</span>
+              </div>
             </div>
           </div>
         )}
