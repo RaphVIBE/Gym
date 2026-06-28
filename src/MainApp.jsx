@@ -64,6 +64,11 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const [recentDates, setRecentDates] = useState([])
   const [volumeRows, setVolumeRows] = useState([])
   const [copied, setCopied] = useState(false)
+  const [programsList, setProgramsList] = useState([])
+  const [sessionDayId, setSessionDayId] = useState(null)
+  const [editorProgramId, setEditorProgramId] = useState(null)
+  const [toast, setToast] = useState(null)
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(null), 1800) }
 
   const inviteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://belgium.netlify.app'
   const inviteMsg = `Rejoins-moi sur Pulse Gym, mon app d'entraînement 💪\n${inviteUrl}`
@@ -91,8 +96,9 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     setLoading(true)
     ;(async () => {
       const since = new Date(); since.setDate(since.getDate() - 56)
-      const [progRes, catRes, wRes, recRes] = await Promise.all([
+      const [progRes, progAllRes, catRes, wRes, recRes] = await Promise.all([
         supabase.from('programs').select('id,name').eq('user_id', uid).eq('is_active', true).maybeSingle(),
+        supabase.from('programs').select('id,name,is_active').eq('user_id', uid).order('created_at'),
         supabase.from('exercises').select('*'),
         supabase.from('weight_log').select('weight,logged_at').eq('user_id', uid).order('logged_at'),
         supabase.from('workouts').select('id, performed_on').eq('user_id', uid).gte('performed_on', localDateStr(since)),
@@ -115,10 +121,10 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       const sugg = days.find((d) => d.weekday === wd) || null
 
       const { data: wo } = await supabase
-        .from('workouts').select('id, title, workout_exercises(*)').eq('user_id', uid).eq('performed_on', todayStr).maybeSingle()
-      let exs = [], wid = null, stitle = ''
+        .from('workouts').select('id, title, program_day_id, workout_exercises(*)').eq('user_id', uid).eq('performed_on', todayStr).maybeSingle()
+      let exs = [], wid = null, stitle = '', sdid = null
       if (wo) {
-        wid = wo.id; stitle = wo.title
+        wid = wo.id; stitle = wo.title; sdid = wo.program_day_id
         exs = (wo.workout_exercises || []).slice().sort((x, y) => x.position - y.position).map(mapWO)
       }
       // logged sets across recent workouts → weekly volume
@@ -140,6 +146,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       setExercises(exs)
       setWorkoutId(wid)
       setSessionTitle(stitle)
+      setSessionDayId(sdid)
+      setProgramsList(progAllRes.data || [])
       if (wid && reloadKey === 0) setTab('train') // open straight into the active session
 
       setWeightHistory((wRes.data || []).map((r) => Number(r.weight)))
@@ -175,6 +183,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     }
     setWorkoutId(wo.id)
     setSessionTitle(title)
+    setSessionDayId(programDayId ?? null)
     setExercises(norm.map((e, i) => ({
       woExId: created[i]?.id ?? null, day_exercise_id: e.day_exercise_id, name: e.name, group: e.group,
       pattern: e.pattern, description: e.description, sets: e.sets, reps: e.reps, weight: e.weight,
@@ -273,9 +282,27 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     if (typeof window !== 'undefined' && !window.confirm('Supprimer la séance du jour ? Les données saisies seront perdues.')) return
     const wid = workoutId
     setOverlay(null)
-    setWorkoutId(null); setSessionTitle(''); setExercises([])
+    setWorkoutId(null); setSessionTitle(''); setExercises([]); setSessionDayId(null)
     setRecentDates((d) => d.filter((x) => x !== todayStr))
     if (wid) await supabase.from('workouts').delete().eq('id', wid)
+  }
+  // save the current session back into its program day (overwrite the template)
+  const saveSessionToProgram = async () => {
+    if (!sessionDayId) return
+    setOverlay(null)
+    await supabase.from('day_exercises').delete().eq('program_day_id', sessionDayId)
+    const rows = exercises.map((e, i) => ({
+      program_day_id: sessionDayId, user_id: uid, position: i, exercise_id: null,
+      name: e.name, muscle_group: e.group, pattern: e.pattern || '', description: e.description || '',
+      sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues,
+    }))
+    if (rows.length) await supabase.from('day_exercises').insert(rows)
+    flash('Séance enregistrée dans le programme')
+  }
+  const activateProgram = async (pid) => {
+    await supabase.from('programs').update({ is_active: false }).eq('user_id', uid).eq('is_active', true)
+    await supabase.from('programs').update({ is_active: true }).eq('id', pid)
+    setReloadKey((k) => k + 1)
   }
 
   // ---- guided session: advance exercise by exercise ----
@@ -310,8 +337,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   if (showEditor) {
     return (
       <ProgramEditor
-        uid={uid} accent={accent} programId={programId} catalog={catalog}
-        onClose={() => { setShowEditor(false); setReloadKey((k) => k + 1) }}
+        uid={uid} accent={accent} programId={editorProgramId || programId} catalog={catalog}
+        onClose={() => { setShowEditor(false); setEditorProgramId(null); setReloadKey((k) => k + 1) }}
         onReonboard={onReonboard}
       />
     )
@@ -364,6 +391,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     const w = numAt(st.weight), r = numAt(st.reps); return s + (w != null && r != null ? w * r : 0)
   }, 0), 0)
   const doneCount = exercises.filter((e) => e.completed).length
+  // distinct sessions of the active program (A, B, C…), deduped by title
+  const sessions = (() => { const seen = {}, out = []; for (const t of templates) { if (!seen[t.title]) { seen[t.title] = 1; out.push(t) } } return out })()
 
   const hist = weightHistory
   const bodyWeight = hist.length ? hist[hist.length - 1] : (profile.bodyweight || 0)
@@ -724,23 +753,65 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
               </div>
             </div>
           )}
+          {/* ============ PROGRAMMES ============ */}
+          {tab === 'programs' && (
+            <div style={{ padding: '60px 20px 130px', animation: 'fadeUp .4s' }}>
+              <div style={{ fontFamily: c.bebas, fontSize: 46, lineHeight: 0.86, letterSpacing: 1, marginBottom: 6 }}>PROGRAMMES</div>
+              <div style={{ font: "500 13px 'Barlow Condensed'", letterSpacing: 0.3, color: c.faint, marginBottom: 20 }}>Tes plans, suggérés par le coach. Active, modifie ou crée-en un nouveau.</div>
+
+              {programsList.map((p) => (
+                <div key={p.id} style={{ background: '#101010', border: '1px solid ' + (p.is_active ? accent : c.hair9), borderRadius: 18, padding: 18, marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 0.5 }}>{p.name}</div>
+                    {p.is_active && <div style={{ font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: '#000', background: accent, borderRadius: 20, padding: '3px 10px' }}>ACTIF</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                    {!p.is_active && <div onClick={() => activateProgram(p.id)} style={{ flex: 1, textAlign: 'center', background: accent, color: '#000', borderRadius: 12, padding: '10px', fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, cursor: 'pointer' }}>ACTIVER</div>}
+                    <div onClick={() => { setEditorProgramId(p.id); setShowEditor(true) }} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '10px', fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, cursor: 'pointer' }}>MODIFIER</div>
+                  </div>
+                </div>
+              ))}
+
+              <div onClick={onReonboard} style={{ border: '1.5px dashed rgba(255,255,255,0.2)', borderRadius: 16, padding: 15, textAlign: 'center', fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, color: accent, cursor: 'pointer', marginBottom: 28 }}>+ NOUVEAU PROGRAMME (COACH)</div>
+
+              {sessions.length > 0 && (
+                <>
+                  <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 1, marginBottom: 4 }}>SÉANCES</div>
+                  <div style={{ font: "500 12px 'Barlow Condensed'", letterSpacing: 0.3, color: c.faint, marginBottom: 10 }}>Du programme actif{programName ? ' · ' + programName : ''}.</div>
+                  {sessions.map((s, i) => (
+                    <div key={s.id} onClick={() => { setEditorProgramId(programId); setShowEditor(true) }} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid ' + c.hair, cursor: 'pointer' }}>
+                      <div style={{ width: 38, height: 38, borderRadius: 11, background: '#1f1f1f', border: '1px solid ' + c.hair9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 20, color: accent, flexShrink: 0 }}>{String.fromCharCode(65 + i)}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 0.3 }}>{s.title}</div>
+                        <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>{s.focus} · {s.exercises.length} exos</div>
+                      </div>
+                      <span style={{ fontFamily: c.bebas, fontSize: 20, color: 'rgba(255,255,255,0.3)' }}>›</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ============ TOAST ============ */}
-        {addedName && (
+        {(addedName || toast) && (
           <div style={{ position: 'absolute', left: 20, right: 20, bottom: 108, zIndex: 75, background: accent, color: '#000', borderRadius: 16, padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', animation: 'fadeUp .3s' }}>
-            <span style={{ fontFamily: c.bebas, fontSize: 18, letterSpacing: 1 }}>AJOUTÉ À LA SÉANCE</span>
-            <span style={{ font: "700 13px 'Barlow Condensed'", letterSpacing: 0.5 }}>{addedName}</span>
+            <span style={{ fontFamily: c.bebas, fontSize: 18, letterSpacing: 1 }}>{toast ? toast.toUpperCase() : 'AJOUTÉ À LA SÉANCE'}</span>
+            {!toast && <span style={{ font: "700 13px 'Barlow Condensed'", letterSpacing: 0.5 }}>{addedName}</span>}
           </div>
         )}
 
         {/* ============ BOTTOM NAV ============ */}
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 70, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '13px 36px 30px', display: 'flex', justifyContent: 'space-between' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 70, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '13px 22px 30px', display: 'flex', justifyContent: 'space-between' }}>
           <NavItem onClick={() => goTab('home')} color={navColor('home')} label="ACCUEIL">
             <path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />
           </NavItem>
           <NavItem onClick={() => goTab('train')} color={navColor('train')} label="SÉANCE" cap>
             <line x1="4" y1="9" x2="4" y2="15" /><line x1="7" y1="6" x2="7" y2="18" /><line x1="17" y1="6" x2="17" y2="18" /><line x1="20" y1="9" x2="20" y2="15" /><line x1="7" y1="12" x2="17" y2="12" />
+          </NavItem>
+          <NavItem onClick={() => goTab('programs')} color={navColor('programs')} label="PROGRAMMES" cap>
+            <line x1="9" y1="6" x2="20" y2="6" /><line x1="9" y1="12" x2="20" y2="12" /><line x1="9" y1="18" x2="20" y2="18" /><line x1="4.5" y1="6" x2="4.5" y2="6" /><line x1="4.5" y1="12" x2="4.5" y2="12" /><line x1="4.5" y1="18" x2="4.5" y2="18" />
           </NavItem>
           <NavItem onClick={() => goTab('stats')} color={navColor('stats')} label="STATS" cap>
             <line x1="5" y1="20" x2="5" y2="13" /><line x1="12" y1="20" x2="12" y2="6" /><line x1="19" y1="20" x2="19" y2="10" />
@@ -890,6 +961,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
               <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 14px' }} />
               <div style={{ fontFamily: c.bebas, fontSize: 28, letterSpacing: 0.5, marginBottom: 8 }}>{sessionTitle || 'SÉANCE'}</div>
               <MenuRow label="REMETTRE À ZÉRO" onClick={resetSession} accent={accent} />
+              {sessionDayId && <MenuRow label="ENREGISTRER DANS LE PROGRAMME" onClick={saveSessionToProgram} accent={accent} />}
               <MenuRow label="CHANGER DE SÉANCE" onClick={() => setOverlay('start')} accent={accent} />
               <MenuRow label="SUPPRIMER LA SÉANCE" onClick={deleteSession} danger />
             </div>

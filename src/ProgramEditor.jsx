@@ -38,15 +38,58 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
   const saveTitle = (dayId, title) => supabase.from('program_days').update({ title }).eq('id', dayId).then(() => {})
   const setDayTitle = (dayId, title) => setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, title } : d)))
 
-  const toggleRest = (day) => {
-    const next = !day.is_rest
-    setDays((ds) => ds.map((d) => (d.id === day.id ? { ...d, is_rest: next } : d)))
-    supabase.from('program_days').update({ is_rest: next }).eq('id', day.id).then(() => {})
+  // distinct session templates (deduped by title) for rotation
+  const sessionTemplates = (list) => { const seen = {}, out = []; for (const d of list) { if (!d.is_rest && !seen[d.title]) { seen[d.title] = 1; out.push(d) } } return out }
+
+  const toggleRest = async (day) => {
+    if (!day.is_rest) {
+      // becomes rest
+      setDays((ds) => ds.map((d) => (d.id === day.id ? { ...d, is_rest: true } : d)))
+      supabase.from('program_days').update({ is_rest: true }).eq('id', day.id).then(() => {})
+      return
+    }
+    // becomes training → assign the next session in rotation (A→B→C)
+    const templates = sessionTemplates(days)
+    const prior = days.filter((d) => d.weekday < day.weekday && !d.is_rest).sort((a, b) => b.weekday - a.weekday)[0]
+    let next = templates[0]
+    if (prior && templates.length) {
+      const idx = templates.findIndex((t) => t.title === prior.title)
+      next = templates[(idx + 1) % templates.length]
+    }
+    const title = next ? next.title : 'SÉANCE'
+    const focus = next ? next.focus : ''
+    await supabase.from('program_days').update({ is_rest: false, title, focus }).eq('id', day.id)
+    await supabase.from('day_exercises').delete().eq('program_day_id', day.id)
+    let newExs = []
+    if (next && next.exercises.length) {
+      const rows = next.exercises.map((e, i) => ({
+        program_day_id: day.id, user_id: uid, position: i, exercise_id: e.exercise_id, name: e.name,
+        muscle_group: e.muscle_group, pattern: e.pattern || '', description: e.description || '',
+        sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues || [],
+      }))
+      const { data } = await supabase.from('day_exercises').insert(rows).select()
+      newExs = (data || []).slice().sort((a, b) => a.position - b.position)
+    }
+    setDays((ds) => ds.map((d) => (d.id === day.id ? { ...d, is_rest: false, title, focus, exercises: newExs } : d)))
   }
 
   const removeExercise = (dayId, exId) => {
     setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, exercises: d.exercises.filter((e) => e.id !== exId) } : d)))
     supabase.from('day_exercises').delete().eq('id', exId).then(() => {})
+  }
+
+  // replace an exercise with another of the same movement pattern (coach suggestion)
+  const replaceExercise = async (dayId, ex) => {
+    const alts = catalog.filter((cx) => cx.pattern === ex.pattern && cx.name !== ex.name)
+    if (!alts.length) return
+    const pick = alts[Math.floor(Math.random() * alts.length)]
+    const patch = {
+      exercise_id: pick.id, name: pick.name, muscle_group: pick.muscle_group, pattern: pick.pattern,
+      description: pick.description, reps: pick.default_reps, cues: pick.cues, video: pick.name,
+      weight: pick.equipment === 'bodyweight' ? 'BW' : ex.weight,
+    }
+    await supabase.from('day_exercises').update(patch).eq('id', ex.id)
+    setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === ex.id ? { ...e, ...patch } : e)) } : d)))
   }
 
   const addExercise = async (dayId, ex) => {
@@ -117,6 +160,9 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ font: "600 15px 'Barlow Condensed'", letterSpacing: 0.3 }}>{ex.name}</div>
                               <div style={{ font: "500 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint, marginTop: 1 }}>{ex.sets} × {ex.reps} · {ex.weight}</div>
+                            </div>
+                            <div onClick={() => replaceExercise(day.id, ex)} title="Remplacer (coach)" style={{ width: 26, height: 26, borderRadius: '50%', background: '#1c1c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, color: accent }}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>
                             </div>
                             <div onClick={() => removeExercise(day.id, ex.id)} style={{ width: 26, height: 26, borderRadius: '50%', background: '#1c1c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
                               <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6h8" stroke="#FF5A3C" strokeWidth="2.2" strokeLinecap="round" /></svg>
