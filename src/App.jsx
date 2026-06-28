@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
+import { supabase } from './supabase.js'
 
 const ACCENT = '#D9FF00'
 const ATHLETE = 'ALEX'
@@ -66,9 +67,33 @@ export default function App() {
   const [cat, setCat] = useState('ALL')
   const [weight, setWeight] = useState('')
   const [addedName, setAddedName] = useState(null)
-  const [bodyWeight, setBodyWeight] = useState(78.4)
-  const [weightHistory, setWeightHistory] = useState([80.1, 79.6, 79.8, 79.2, 78.9, 78.7, 78.6, 78.4])
-  const [exercises, setExercises] = useState(INITIAL_EXERCISES)
+  const [weightHistory, setWeightHistory] = useState([])
+  const [exercises, setExercises] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const bodyWeight = weightHistory.length ? weightHistory[weightHistory.length - 1] : 0
+
+  // ---- load from Supabase ----
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      const [exRes, wRes] = await Promise.all([
+        supabase.from('session_exercises').select('*').order('position'),
+        supabase.from('weight_log').select('weight').order('logged_at'),
+      ])
+      if (!active) return
+      if (exRes.data) {
+        setExercises(exRes.data.map((r) => ({
+          id: r.id, name: r.name, group: r.muscle_group, sets: r.sets, reps: r.reps,
+          weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video,
+          completed: r.completed, cues: r.cues || [],
+        })))
+      }
+      if (wRes.data) setWeightHistory(wRes.data.map((r) => Number(r.weight)))
+      setLoading(false)
+    })()
+    return () => { active = false }
+  }, [])
 
   const goTab = (t) => { setTab(t); setOverlay(null) }
   const openDetail = (i) => { setSelected(i); setOverlay('detail') }
@@ -76,25 +101,51 @@ export default function App() {
   const openLog = () => { setOverlay('logweight'); setWeight(String(bodyWeight)) }
   const closeOverlay = () => setOverlay(null)
 
-  const toggle = (i) => setExercises((ex) => ex.map((e, k) => (k === i ? { ...e, completed: !e.completed } : e)))
+  const toggle = (i) => {
+    const ex = exercises[i]
+    if (!ex) return
+    const next = !ex.completed
+    setExercises((list) => list.map((e, k) => (k === i ? { ...e, completed: next } : e)))
+    if (ex.id) supabase.from('session_exercises').update({ completed: next }).eq('id', ex.id).then(() => {})
+  }
 
-  const addExercise = (lib) => {
-    setExercises((ex) => [...ex, {
-      name: lib.name, group: lib.group.toUpperCase(), sets: lib.sets, reps: lib.reps, weight: lib.weight,
-      rest: '1:30', tempo: '2-1-1', video: lib.name, completed: false,
-      cues: ['Move with a controlled tempo', 'Use a full range of motion', 'Brace your core throughout', 'Breathe out on the effort'],
-    }])
+  const addExercise = async (lib) => {
     setOverlay(null)
     setAddedName(lib.name)
     setTimeout(() => setAddedName(null), 1800)
+    const row = {
+      position: exercises.length,
+      name: lib.name, muscle_group: lib.group.toUpperCase(), sets: lib.sets, reps: lib.reps, weight: lib.weight,
+      rest: '1:30', tempo: '2-1-1', video: lib.name, completed: false,
+      cues: ['Move with a controlled tempo', 'Use a full range of motion', 'Brace your core throughout', 'Breathe out on the effort'],
+    }
+    const { data } = await supabase.from('session_exercises').insert(row).select().single()
+    const created = data || row
+    setExercises((list) => [...list, {
+      id: created.id, name: created.name, group: created.muscle_group, sets: created.sets, reps: created.reps,
+      weight: created.weight, rest: created.rest, tempo: created.tempo, video: created.video,
+      completed: created.completed, cues: created.cues || row.cues,
+    }])
   }
 
-  const saveWeight = () => {
+  const saveWeight = async () => {
     const w = parseFloat(weight)
     if (isNaN(w)) { setOverlay(null); return }
-    setBodyWeight(w)
     setWeightHistory((h) => [...h.slice(1), w])
     setOverlay(null)
+    await supabase.from('weight_log').insert({ weight: w })
+  }
+
+  if (loading || exercises.length === 0 || weightHistory.length === 0) {
+    return (
+      <PhoneFrame>
+        <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          <div style={{ fontFamily: c.bebas, fontSize: 40, letterSpacing: 2, color: accent }}>PULSE</div>
+          <div style={{ width: 26, height: 26, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: accent, animation: 'spin .8s linear infinite' }} />
+          <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 2, color: 'rgba(255,255,255,0.4)' }}>{loading ? 'LOADING SESSION' : 'NO DATA'}</div>
+        </div>
+      </PhoneFrame>
+    )
   }
 
   // ---- derived ----

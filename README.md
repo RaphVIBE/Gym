@@ -9,7 +9,7 @@ A Nike-inspired workout tracker, built from the `Pulse Gym.dc.html` design comp 
 - **Exercise detail** — form video placeholder, key metrics, per-set log, form cues, and a mark-complete button.
 - **Stats** — body-weight trend chart, log-weight bottom sheet, PR tiles, sessions/week bars, and drop-in progress photos.
 
-All state is in-memory (React `useState`), faithful to the original comp logic.
+Workout completion and body-weight history persist to **Supabase** (single shared dataset, no login).
 
 ## Run
 
@@ -26,12 +26,37 @@ Then open the printed local URL (default http://localhost:5173).
 
 ```
 index.html            # Vite entry, loads Google Fonts (Bebas Neue, Barlow Condensed)
+netlify.toml          # Netlify build + SPA redirect config
+.env                  # Supabase URL + publishable key (gitignored)
+.env.example          # template for the above
 src/
   main.jsx            # React root
-  App.jsx             # full app: state, views, overlays
+  App.jsx             # full app: state, views, overlays, Supabase load/save
   PhoneFrame.jsx      # iOS device frame wrapper
+  supabase.js         # Supabase client
   index.css           # global styles + keyframes
 ```
+
+## Backend (Supabase)
+
+Two tables, both with row-level security:
+
+- `session_exercises` — the current workout (name, scheme, load, completion, form cues).
+- `weight_log` — body-weight entries over time.
+
+The publishable (anon) key is safe to ship in the browser; access is governed by RLS.
+Config lives in `.env` locally, with committed fallbacks in `src/supabase.js` so the
+app builds anywhere. Override per-environment with `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY`.
+
+> The single-dataset setup uses permissive `anon` policies by design. Add Supabase
+> Auth + per-user RLS if you later want private, per-account data.
+
+## Deploy (Netlify)
+
+`netlify.toml` is preconfigured (`npm run build` → publish `dist/`, SPA fallback).
+Connect the GitHub repo in Netlify and it deploys on every push — no env vars
+required thanks to the committed publishable-key fallback.
 
 ## Customize
 
