@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
-import { c, WEEKDAYS } from './theme.js'
+import { c } from './theme.js'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'] }
 
+// A program is just a set of sessions (A, B, C…), each an ordered list of exercises.
 export default function ProgramEditor({ uid, accent, programId, catalog, onClose, onReonboard }) {
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
-  const [days, setDays] = useState([])
-  const [picker, setPicker] = useState(null) // { dayId }
+  const [sessions, setSessions] = useState([])
+  const [picker, setPicker] = useState(null) // { sessionId }
   const [search, setSearch] = useState('')
   const [cat, setCat] = useState('TOUS')
 
@@ -19,7 +20,7 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
     ;(async () => {
       if (!programId) { setLoading(false); return }
       const { data: prog } = await supabase.from('programs').select('name').eq('id', programId).maybeSingle()
-      const { data: dayRows } = await supabase.from('program_days').select('*').eq('program_id', programId).order('weekday')
+      const { data: dayRows } = await supabase.from('program_days').select('*').eq('program_id', programId).order('position')
       const ids = (dayRows || []).map((d) => d.id)
       let exByDay = {}
       if (ids.length) {
@@ -28,58 +29,46 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
       }
       if (!active) return
       setName(prog?.name || '')
-      setDays((dayRows || []).map((d) => ({ ...d, exercises: exByDay[d.id] || [] })))
+      setSessions((dayRows || []).map((d) => ({ ...d, exercises: exByDay[d.id] || [] })))
       setLoading(false)
     })()
     return () => { active = false }
   }, [programId])
 
   const saveName = () => { if (programId) supabase.from('programs').update({ name }).eq('id', programId).then(() => {}) }
-  const saveTitle = (dayId, title) => supabase.from('program_days').update({ title }).eq('id', dayId).then(() => {})
-  const setDayTitle = (dayId, title) => setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, title } : d)))
+  const setTitle = (sid, title) => setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, title } : s)))
+  const saveTitle = (sid, title) => supabase.from('program_days').update({ title }).eq('id', sid).then(() => {})
 
-  // distinct session templates (deduped by title) for rotation
-  const sessionTemplates = (list) => { const seen = {}, out = []; for (const d of list) { if (!d.is_rest && !seen[d.title]) { seen[d.title] = 1; out.push(d) } } return out }
-
-  const toggleRest = async (day) => {
-    if (!day.is_rest) {
-      // becomes rest
-      setDays((ds) => ds.map((d) => (d.id === day.id ? { ...d, is_rest: true } : d)))
-      supabase.from('program_days').update({ is_rest: true }).eq('id', day.id).then(() => {})
-      return
-    }
-    // becomes training → assign the next session in rotation (A→B→C)
-    const templates = sessionTemplates(days)
-    const prior = days.filter((d) => d.weekday < day.weekday && !d.is_rest).sort((a, b) => b.weekday - a.weekday)[0]
-    let next = templates[0]
-    if (prior && templates.length) {
-      const idx = templates.findIndex((t) => t.title === prior.title)
-      next = templates[(idx + 1) % templates.length]
-    }
-    const title = next ? next.title : 'SÉANCE'
-    const focus = next ? next.focus : ''
-    await supabase.from('program_days').update({ is_rest: false, title, focus }).eq('id', day.id)
-    await supabase.from('day_exercises').delete().eq('program_day_id', day.id)
-    let newExs = []
-    if (next && next.exercises.length) {
-      const rows = next.exercises.map((e, i) => ({
-        program_day_id: day.id, user_id: uid, position: i, exercise_id: e.exercise_id, name: e.name,
-        muscle_group: e.muscle_group, pattern: e.pattern || '', description: e.description || '',
-        sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues || [],
-      }))
-      const { data } = await supabase.from('day_exercises').insert(rows).select()
-      newExs = (data || []).slice().sort((a, b) => a.position - b.position)
-    }
-    setDays((ds) => ds.map((d) => (d.id === day.id ? { ...d, is_rest: false, title, focus, exercises: newExs } : d)))
+  const addSession = async () => {
+    const pos = sessions.length
+    const { data } = await supabase.from('program_days')
+      .insert({ program_id: programId, user_id: uid, position: pos, weekday: pos, title: 'NOUVELLE SÉANCE', focus: '', is_rest: false })
+      .select().single()
+    if (data) setSessions((ss) => [...ss, { ...data, exercises: [] }])
+  }
+  const deleteSession = async (sid) => {
+    if (typeof window !== 'undefined' && !window.confirm('Supprimer cette séance ?')) return
+    setSessions((ss) => ss.filter((s) => s.id !== sid))
+    await supabase.from('program_days').delete().eq('id', sid)
   }
 
-  const removeExercise = (dayId, exId) => {
-    setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, exercises: d.exercises.filter((e) => e.id !== exId) } : d)))
+  const addExercise = async (sid, ex) => {
+    const s = sessions.find((x) => x.id === sid)
+    const position = s ? s.exercises.length : 0
+    const row = {
+      program_day_id: sid, user_id: uid, position, exercise_id: ex.id, name: ex.name,
+      muscle_group: ex.muscle_group, pattern: ex.pattern || '', description: ex.description || '',
+      sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—', rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [],
+    }
+    const { data } = await supabase.from('day_exercises').insert(row).select().single()
+    setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, exercises: [...s.exercises, data || { ...row, id: Math.random() }] } : s)))
+    setPicker(null)
+  }
+  const removeExercise = (sid, exId) => {
+    setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, exercises: s.exercises.filter((e) => e.id !== exId) } : s)))
     supabase.from('day_exercises').delete().eq('id', exId).then(() => {})
   }
-
-  // replace an exercise with another of the same movement pattern (coach suggestion)
-  const replaceExercise = async (dayId, ex) => {
+  const replaceExercise = async (sid, ex) => {
     const alts = catalog.filter((cx) => cx.pattern === ex.pattern && cx.name !== ex.name)
     if (!alts.length) return
     const pick = alts[Math.floor(Math.random() * alts.length)]
@@ -89,21 +78,20 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
       weight: pick.equipment === 'bodyweight' ? 'BW' : ex.weight,
     }
     await supabase.from('day_exercises').update(patch).eq('id', ex.id)
-    setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === ex.id ? { ...e, ...patch } : e)) } : d)))
+    setSessions((ss) => ss.map((s) => (s.id === sid ? { ...s, exercises: s.exercises.map((e) => (e.id === ex.id ? { ...e, ...patch } : e)) } : s)))
   }
-
-  const addExercise = async (dayId, ex) => {
-    const day = days.find((d) => d.id === dayId)
-    const position = day ? day.exercises.length : 0
-    const row = {
-      program_day_id: dayId, user_id: uid, position, exercise_id: ex.id, name: ex.name,
-      muscle_group: ex.muscle_group, pattern: ex.pattern || '', description: ex.description || '',
-      sets: 3, reps: ex.default_reps,
-      weight: ex.equipment === 'bodyweight' ? 'BW' : '—', rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [],
-    }
-    const { data } = await supabase.from('day_exercises').insert(row).select().single()
-    setDays((ds) => ds.map((d) => (d.id === dayId ? { ...d, exercises: [...d.exercises, data || { ...row, id: Math.random() }] } : d)))
-    setPicker(null)
+  const moveExercise = async (sid, idx, dir) => {
+    const s = sessions.find((x) => x.id === sid); if (!s) return
+    const j = idx + dir
+    if (j < 0 || j >= s.exercises.length) return
+    const arr = s.exercises.slice()
+    const a = arr[idx], b = arr[j]
+    arr[idx] = b; arr[j] = a
+    setSessions((ss) => ss.map((x) => (x.id === sid ? { ...x, exercises: arr } : x)))
+    await Promise.all([
+      supabase.from('day_exercises').update({ position: idx }).eq('id', b.id),
+      supabase.from('day_exercises').update({ position: j }).eq('id', a.id),
+    ])
   }
 
   if (loading) {
@@ -119,6 +107,7 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
   const q = search.toLowerCase()
   const wantPatterns = CAT_PATTERNS[cat]
   const library = catalog.filter((l) => (!wantPatterns || wantPatterns.includes(l.pattern)) && l.name.toLowerCase().includes(q)).slice(0, 60)
+  const iconBtn = { width: 26, height: 26, borderRadius: '50%', background: '#1c1c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }
 
   return (
     <PhoneFrame>
@@ -143,45 +132,50 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
                 <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName}
                   style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: c.bebas, fontSize: 24, letterSpacing: 0.5, outline: 'none', marginBottom: 22 }} />
 
-                {days.map((day) => (
-                  <div key={day.id} style={{ marginBottom: 16, background: '#101010', border: '1px solid ' + c.hair9, borderRadius: 18, padding: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: day.is_rest ? 0 : 12 }}>
-                      <div style={{ width: 38, fontFamily: c.bebas, fontSize: 22, color: accent }}>{WEEKDAYS[day.weekday]}</div>
-                      <input value={day.is_rest ? 'REPOS' : day.title} disabled={day.is_rest}
-                        onChange={(e) => setDayTitle(day.id, e.target.value.toUpperCase())} onBlur={(e) => saveTitle(day.id, e.target.value.toUpperCase())}
-                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: day.is_rest ? c.faint : '#fff', fontFamily: c.bebas, fontSize: 22, letterSpacing: 0.5 }} />
-                      <div onClick={() => toggleRest(day)} style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 20, fontFamily: c.bebas, fontSize: 14, letterSpacing: 1, cursor: 'pointer', background: day.is_rest ? accent : 'transparent', color: day.is_rest ? '#000' : c.faint, border: '1px solid ' + (day.is_rest ? accent : 'rgba(255,255,255,0.14)') }}>REPOS</div>
+                {sessions.map((s, si) => (
+                  <div key={s.id} style={{ marginBottom: 16, background: '#101010', border: '1px solid ' + c.hair9, borderRadius: 18, padding: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 10, background: '#1f1f1f', border: '1px solid ' + c.hair9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 18, color: accent, flexShrink: 0 }}>{String.fromCharCode(65 + si)}</div>
+                      <input value={s.title} onChange={(e) => setTitle(s.id, e.target.value.toUpperCase())} onBlur={(e) => saveTitle(s.id, e.target.value.toUpperCase())}
+                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: '#fff', fontFamily: c.bebas, fontSize: 22, letterSpacing: 0.5 }} />
+                      <div onClick={() => deleteSession(s.id)} style={iconBtn} title="Supprimer la séance">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#FF5A3C" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+                      </div>
                     </div>
 
-                    {!day.is_rest && (
-                      <>
-                        {day.exercises.map((ex) => (
-                          <div key={ex.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid ' + c.hair }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ font: "600 15px 'Barlow Condensed'", letterSpacing: 0.3 }}>{ex.name}</div>
-                              <div style={{ font: "500 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint, marginTop: 1 }}>{ex.sets} × {ex.reps} · {ex.weight}</div>
-                            </div>
-                            <div onClick={() => replaceExercise(day.id, ex)} title="Remplacer (coach)" style={{ width: 26, height: 26, borderRadius: '50%', background: '#1c1c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, color: accent }}>
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>
-                            </div>
-                            <div onClick={() => removeExercise(day.id, ex.id)} style={{ width: 26, height: 26, borderRadius: '50%', background: '#1c1c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
-                              <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6h8" stroke="#FF5A3C" strokeWidth="2.2" strokeLinecap="round" /></svg>
-                            </div>
-                          </div>
-                        ))}
-                        <div onClick={() => { setPicker({ dayId: day.id }); setSearch(''); setCat('TOUS') }} style={{ marginTop: 10, border: '1.5px dashed rgba(255,255,255,0.18)', borderRadius: 12, padding: 10, textAlign: 'center', fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>+ AJOUTER</div>
-                      </>
-                    )}
+                    {s.exercises.map((ex, idx) => (
+                      <div key={ex.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', borderTop: '1px solid ' + c.hair }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ font: "600 15px 'Barlow Condensed'", letterSpacing: 0.3 }}>{ex.name}</div>
+                          <div style={{ font: "500 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint, marginTop: 1 }}>{ex.sets} × {ex.reps} · {ex.weight}</div>
+                        </div>
+                        <div onClick={() => moveExercise(s.id, idx, -1)} style={{ ...iconBtn, opacity: idx > 0 ? 1 : 0.3 }} title="Monter">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 14l6-6 6 6" /></svg>
+                        </div>
+                        <div onClick={() => moveExercise(s.id, idx, 1)} style={{ ...iconBtn, opacity: idx < s.exercises.length - 1 ? 1 : 0.3 }} title="Descendre">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10l6 6 6-6" /></svg>
+                        </div>
+                        <div onClick={() => replaceExercise(s.id, ex)} style={{ ...iconBtn, color: accent }} title="Remplacer (coach)">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>
+                        </div>
+                        <div onClick={() => removeExercise(s.id, ex.id)} style={iconBtn} title="Retirer">
+                          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6h8" stroke="#FF5A3C" strokeWidth="2.2" strokeLinecap="round" /></svg>
+                        </div>
+                      </div>
+                    ))}
+                    <div onClick={() => { setPicker({ sessionId: s.id }); setSearch(''); setCat('TOUS') }} style={{ marginTop: 10, border: '1.5px dashed rgba(255,255,255,0.18)', borderRadius: 12, padding: 10, textAlign: 'center', fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>+ AJOUTER UN EXERCICE</div>
                   </div>
                 ))}
 
-                <div onClick={onReonboard} style={{ marginTop: 8, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', color: accent, borderRadius: 30, padding: 15, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, cursor: 'pointer' }}>↻ REGÉNÉRER AVEC LE COACH</div>
+                <div onClick={addSession} style={{ border: '1.5px dashed rgba(255,255,255,0.25)', borderRadius: 16, padding: 14, textAlign: 'center', fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, color: accent, cursor: 'pointer', marginBottom: 14 }}>+ AJOUTER UNE SÉANCE</div>
+
+                <div onClick={onReonboard} style={{ background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', color: accent, borderRadius: 30, padding: 15, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, cursor: 'pointer' }}>↻ REGÉNÉRER AVEC LE COACH</div>
               </>
             )}
           </div>
         </div>
 
-        {/* exercise picker */}
+        {/* picker */}
         {picker && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 90, background: '#0A0A0A', overflowY: 'auto', animation: 'overlayIn .2s' }}>
             <div style={{ padding: '54px 20px 14px', position: 'sticky', top: 0, background: '#0A0A0A', zIndex: 2 }}>
@@ -189,7 +183,7 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
                 <div onClick={() => setPicker(null)} style={{ width: 40, height: 40, borderRadius: '50%', background: '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
                   <svg width="11" height="18" viewBox="0 0 11 18"><path d="M9 2L2 9l7 7" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
-                <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 1 }}>AJOUTER À {WEEKDAYS[days.find((d) => d.id === picker.dayId)?.weekday] || ''}</div>
+                <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 1 }}>AJOUTER UN EXERCICE</div>
               </div>
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un exercice…" style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: "'Barlow Condensed'", fontSize: 16, outline: 'none' }} />
               <div style={{ display: 'flex', gap: 7, marginTop: 12, overflowX: 'auto', paddingBottom: 2 }}>
@@ -200,7 +194,7 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
             </div>
             <div style={{ padding: '8px 20px 40px' }}>
               {library.map((lib) => (
-                <div key={lib.id} onClick={() => addExercise(picker.dayId, lib)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '15px 0', borderBottom: '1px solid ' + c.hair7, cursor: 'pointer' }}>
+                <div key={lib.id} onClick={() => addExercise(picker.sessionId, lib)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '15px 0', borderBottom: '1px solid ' + c.hair7, cursor: 'pointer' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ font: "600 18px 'Barlow Condensed'", letterSpacing: 0.3 }}>{lib.name}</div>
                     <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, marginTop: 2 }}>{lib.muscle_group} · {lib.equipment}</div>

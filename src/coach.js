@@ -19,14 +19,13 @@ const EQUIPMENT_SETS = {
   bodyweight: ['bodyweight'],
 }
 
-// ---- weekday placement per training frequency ----
-// 0 = Mon … 6 = Sun
-const FREQUENCY_PLAN = {
-  2: { days: [0, 3], split: ['full', 'full'] },
-  3: { days: [0, 2, 4], split: ['full', 'full', 'full'] },
-  4: { days: [0, 1, 3, 4], split: ['upper', 'lower', 'upper', 'lower'] },
-  5: { days: [0, 1, 2, 3, 4], split: ['push', 'pull', 'legs', 'upper', 'lower'] },
-  6: { days: [0, 1, 2, 3, 4, 5], split: ['push', 'pull', 'legs', 'push', 'pull', 'legs'] },
+// ---- distinct sessions per training frequency (A, B, C…) ----
+const SESSION_PLAN = {
+  2: ['full', 'full'],
+  3: ['full', 'full', 'full'],
+  4: ['upper', 'lower'],
+  5: ['push', 'pull', 'legs', 'upper', 'lower'],
+  6: ['push', 'pull', 'legs'],
 }
 
 // ---- pattern slots per day type ----
@@ -96,7 +95,6 @@ export function generateProgram(profile, catalog) {
   const goal = profile.goal || 'general'
   const scheme = GOAL_SCHEME[goal] || GOAL_SCHEME.general
   const freq = Math.max(2, Math.min(6, profile.days_per_week || 4))
-  const plan = FREQUENCY_PLAN[freq]
   const allowedEquip = EQUIPMENT_SETS[profile.equipment] || EQUIPMENT_SETS.full_gym
   const diffCap = profile.experience === 'beginner' ? 2 : 3
   const avoid = (profile.avoid || []).map((a) => a.toLowerCase())
@@ -126,56 +124,44 @@ export function generateProgram(profile, catalog) {
   }
 
   const count = targetCount(profile)
-  const days = []
+  const types = SESSION_PLAN[freq] || SESSION_PLAN[3]
+  const typeCounts = {}
+  types.forEach((t) => { typeCounts[t] = (typeCounts[t] || 0) + 1 })
+  const typeSeen = {}
 
-  for (let w = 0; w <= 6; w++) {
-    const idx = plan.days.indexOf(w)
-    if (idx === -1) {
-      days.push({ weekday: w, title: 'REPOS', focus: '', is_rest: true, exercises: [] })
-      continue
-    }
-    const type = plan.split[idx]
+  const sessions = types.map((type) => {
     const tpl = DAY_TEMPLATES[type]
     let patterns = tpl.patterns.slice(0, count)
     if (scheme.finisher) patterns = [...patterns, 'conditioning']
 
-    const dayUsed = new Set()
+    const used = new Set()
     const exercises = []
     let pos = 0
     for (const pattern of patterns) {
-      const ex = pick(pattern, dayUsed)
+      const ex = pick(pattern, used)
       if (!ex) continue
-      dayUsed.add(ex.id)
+      used.add(ex.id)
       usedCount[ex.id] = (usedCount[ex.id] || 0) + 1
       const isCompound = COMPOUND_PATTERNS.includes(pattern)
       const reps = pattern === 'conditioning' || pattern === 'core'
         ? ex.default_reps
         : (isCompound ? scheme.compoundReps : ex.default_reps)
       exercises.push({
-        exercise_id: ex.id,
-        name: ex.name,
-        muscle_group: ex.muscle_group,
-        pattern: ex.pattern,
+        exercise_id: ex.id, name: ex.name, muscle_group: ex.muscle_group, pattern: ex.pattern,
         description: ex.description || '',
         sets: pattern === 'conditioning' ? 1 : (isCompound ? scheme.sets : Math.max(3, scheme.sets - 1)),
-        reps,
-        weight: estimateLoad(ex, profile, scheme),
-        rest: pattern === 'conditioning' ? '1:00' : scheme.rest,
-        tempo: scheme.tempo,
-        video: ex.name,
-        cues: ex.cues || [],
-        position: pos++,
+        reps, weight: estimateLoad(ex, profile, scheme),
+        rest: pattern === 'conditioning' ? '1:00' : scheme.rest, tempo: scheme.tempo,
+        video: ex.name, cues: ex.cues || [], position: pos++,
       })
     }
-    days.push({ weekday: w, title: tpl.title, focus: scheme.focus, is_rest: false, exercises })
-  }
+    let title = tpl.title
+    if (typeCounts[type] > 1) { typeSeen[type] = (typeSeen[type] || 0) + 1; title += ' ' + String.fromCharCode(64 + typeSeen[type]) }
+    return { title, focus: scheme.focus, exercises }
+  })
 
   const goalName = { strength: 'Force', hypertrophy: 'Hypertrophie', fat_loss: 'Perte de Gras', conditioning: 'Cardio', general: 'Forme Générale' }[goal]
-  return {
-    name: `${freq} jours · ${goalName}`,
-    goal,
-    days,
-  }
+  return { name: `${freq} jours · ${goalName}`, goal, sessions }
 }
 
 // Persist a generated program, making it the active one.
@@ -189,14 +175,16 @@ export async function persistProgram(supabase, userId, program) {
     .select().single()
   if (pErr) throw pErr
 
-  for (const d of program.days) {
+  const sessions = program.sessions || []
+  for (let i = 0; i < sessions.length; i++) {
+    const sdef = sessions[i]
     const { data: day, error: dErr } = await supabase
       .from('program_days')
-      .insert({ program_id: prog.id, user_id: userId, weekday: d.weekday, title: d.title, focus: d.focus, is_rest: d.is_rest })
+      .insert({ program_id: prog.id, user_id: userId, position: i, weekday: i, title: sdef.title, focus: sdef.focus, is_rest: false })
       .select().single()
     if (dErr) throw dErr
-    if (d.exercises.length) {
-      const rows = d.exercises.map((e) => ({
+    if (sdef.exercises.length) {
+      const rows = sdef.exercises.map((e) => ({
         program_day_id: day.id, user_id: userId, position: e.position,
         exercise_id: e.exercise_id, name: e.name, muscle_group: e.muscle_group,
         pattern: e.pattern, description: e.description,

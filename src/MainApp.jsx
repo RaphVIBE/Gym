@@ -54,8 +54,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const [programId, setProgramId] = useState(null)
   const [programName, setProgramName] = useState('')
   const [programDays, setProgramDays] = useState([])
-  const [templates, setTemplates] = useState([])     // non-rest days, startable any day
-  const [suggestion, setSuggestion] = useState(null)  // today's weekday slot
+  const [templates, setTemplates] = useState([])     // sessions A/B/C, startable any day
   const [exercises, setExercises] = useState([])
   const [workoutId, setWorkoutId] = useState(null)
   const [sessionTitle, setSessionTitle] = useState('')
@@ -97,7 +96,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     ;(async () => {
       const since = new Date(); since.setDate(since.getDate() - 56)
       const [progRes, progAllRes, catRes, wRes, recRes] = await Promise.all([
-        supabase.from('programs').select('id,name').eq('user_id', uid).eq('is_active', true).maybeSingle(),
+        supabase.from('programs').select('id,name').eq('user_id', uid).eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.from('programs').select('id,name,is_active').eq('user_id', uid).order('created_at'),
         supabase.from('exercises').select('*'),
         supabase.from('weight_log').select('weight,logged_at').eq('user_id', uid).order('logged_at'),
@@ -107,7 +106,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       const prog = progRes.data
       let days = []
       if (prog) {
-        const { data: dayRows } = await supabase.from('program_days').select('*').eq('program_id', prog.id).order('weekday')
+        const { data: dayRows } = await supabase.from('program_days').select('*').eq('program_id', prog.id).order('position')
         days = dayRows || []
         const ids = days.map((d) => d.id)
         let exByDay = {}
@@ -117,8 +116,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
         }
         days = days.map((d) => ({ ...d, exercises: exByDay[d.id] || [] }))
       }
-      const tmpl = days.filter((d) => !d.is_rest)
-      const sugg = days.find((d) => d.weekday === wd) || null
+      const tmpl = days // sessions A/B/C (ordered)
 
       const { data: wo } = await supabase
         .from('workouts').select('id, title, program_day_id, workout_exercises(*)').eq('user_id', uid).eq('performed_on', todayStr).maybeSingle()
@@ -142,7 +140,6 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       setProgramName(prog?.name || '')
       setProgramDays(days)
       setTemplates(tmpl)
-      setSuggestion(sugg)
       setExercises(exs)
       setWorkoutId(wid)
       setSessionTitle(stitle)
@@ -345,7 +342,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   }
 
   // ---- derived ----
-  const suggIsRest = !suggestion || suggestion.is_rest
+  const sessions = templates // A, B, C… (ordered)
   const title = sessionTitle || ''
   const titleLines = title.split(' ')
   const total = exercises.length
@@ -367,14 +364,26 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     const d = new Date(ds + 'T00:00:00')
     if (d >= mon) weekDoneWeekdays.add(todayWeekday(d))
   }
-  const week = programDays.map((d) => {
-    const st = d.weekday === wd ? 'today' : (weekDoneWeekdays.has(d.weekday) ? 'done' : (d.is_rest ? 'rest' : 'next'))
+  // light suggestion only: spread training days across the week, rotate sessions A/B/C
+  const TRAIN_DAYS = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] }
+  const freq = Math.max(2, Math.min(6, profile.days_per_week || sessions.length || 3))
+  const trainSet = TRAIN_DAYS[freq] || [0, 2, 4]
+  const weekPlan = []
+  let rot = 0
+  for (let d = 0; d < 7; d++) {
+    if (trainSet.includes(d) && sessions.length) { weekPlan[d] = { rest: false, session: sessions[rot % sessions.length] }; rot++ }
+    else weekPlan[d] = { rest: true, session: null }
+  }
+  const todaySuggestion = weekPlan[wd]
+  const suggIsRest = !todaySuggestion || todaySuggestion.rest || !todaySuggestion.session
+  const week = weekPlan.map((p, d) => {
+    const st = d === wd ? 'today' : (weekDoneWeekdays.has(d) ? 'done' : (p.rest ? 'rest' : 'next'))
     return {
-      day: WEEKDAYS[d.weekday], focus: d.is_rest ? 'REPOS' : d.title,
-      dayColor: st === 'today' ? accent : (d.is_rest ? 'rgba(255,255,255,0.3)' : '#fff'),
-      focusColor: d.is_rest ? 'rgba(255,255,255,0.3)' : (st === 'today' ? '#fff' : 'rgba(255,255,255,0.7)'),
+      day: WEEKDAYS[d], focus: p.rest ? 'REPOS' : p.session.title,
+      dayColor: st === 'today' ? accent : (p.rest ? 'rgba(255,255,255,0.3)' : '#fff'),
+      focusColor: p.rest ? 'rgba(255,255,255,0.3)' : (st === 'today' ? '#fff' : 'rgba(255,255,255,0.7)'),
       stateColor: st === 'today' ? accent : (st === 'done' ? accent : 'rgba(255,255,255,0.35)'),
-      stateLabel: st === 'today' ? 'AUJ.' : (st === 'done' ? 'FAIT' : (d.is_rest ? 'REPOS' : 'SUGGÉRÉ')),
+      stateLabel: st === 'today' ? 'AUJ.' : (st === 'done' ? 'FAIT' : (p.rest ? 'REPOS' : 'SUGGÉRÉ')),
     }
   })
 
@@ -391,8 +400,6 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     const w = numAt(st.weight), r = numAt(st.reps); return s + (w != null && r != null ? w * r : 0)
   }, 0), 0)
   const doneCount = exercises.filter((e) => e.completed).length
-  // distinct sessions of the active program (A, B, C…), deduped by title
-  const sessions = (() => { const seen = {}, out = []; for (const t of templates) { if (!seen[t.title]) { seen[t.title] = 1; out.push(t) } } return out })()
 
   const hist = weightHistory
   const bodyWeight = hist.length ? hist[hist.length - 1] : (profile.bodyweight || 0)
@@ -516,9 +523,9 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent }} />{started ? 'SÉANCE EN COURS' : 'SÉANCE DU JOUR'}</div>
                     <span style={{ fontFamily: c.bebas, fontSize: 22, color: 'rgba(255,255,255,0.3)' }}>→</span>
                   </div>
-                  <div style={{ fontFamily: c.bebas, fontSize: 56, lineHeight: 0.84, margin: '16px 0 8px' }}>{started ? title : (suggIsRest ? 'À TOI DE JOUER' : suggestion.title)}</div>
+                  <div style={{ fontFamily: c.bebas, fontSize: 56, lineHeight: 0.84, margin: '16px 0 8px' }}>{started ? title : (suggIsRest ? 'À TOI DE JOUER' : todaySuggestion.session.title)}</div>
                   <div style={{ font: "600 14px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.5)' }}>
-                    {started ? `${total} EXOS · ${sessionMin} MIN` : (suggIsRest ? 'Choisis ta séance — entraîne-toi quand tu veux' : `SUGGÉRÉ · ${suggestion.exercises.length} EXOS`)}
+                    {started ? `${total} EXOS · ${sessionMin} MIN` : (suggIsRest ? 'Choisis ta séance — entraîne-toi quand tu veux' : `SUGGÉRÉ · ${todaySuggestion.session.exercises.length} EXOS`)}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 22 }}>
                     {started ? (
@@ -825,12 +832,12 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
               <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 18px' }} />
               <div style={{ fontFamily: c.bebas, fontSize: 32, letterSpacing: 0.5, marginBottom: 16 }}>DÉMARRER UNE SÉANCE</div>
 
-              {suggestion && !suggestion.is_rest && (
-                <div onClick={() => startTemplate(suggestion)} style={{ background: accent, color: '#000', borderRadius: 16, padding: '15px 18px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {!suggIsRest && (
+                <div onClick={() => startTemplate(todaySuggestion.session)} style={{ background: accent, color: '#000', borderRadius: 16, padding: '15px 18px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ font: "700 10px 'Barlow Condensed'", letterSpacing: 1.5, opacity: 0.65 }}>SUGGÉRÉ AUJOURD'HUI</div>
-                    <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 0.5 }}>{suggestion.title}</div>
-                    <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1, opacity: 0.7 }}>{suggestion.exercises.length} EXERCICES</div>
+                    <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 0.5 }}>{todaySuggestion.session.title}</div>
+                    <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1, opacity: 0.7 }}>{todaySuggestion.session.exercises.length} EXERCICES</div>
                   </div>
                   <span style={{ fontFamily: c.bebas, fontSize: 30 }}>▸</span>
                 </div>
