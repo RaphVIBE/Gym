@@ -1,7 +1,8 @@
 * { box-sizing: border-box; }
+html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: #1a1a1a;
+  background: #0A0A0A;
   font-family: 'Barlow Condensed', sans-serif;
 }
 *::-webkit-scrollbar { display: none; }
