@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
-import { supabase } from './supabase.js'
+import { supabase, KEEP_KEY } from './supabase.js'
 import { c, ACCENT_DEFAULT } from './theme.js'
 
 const accent = ACCENT_DEFAULT
@@ -9,12 +9,14 @@ export default function AuthScreen() {
   const [mode, setMode] = useState('login') // login | signup
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [keep, setKeep] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
   const submit = async () => {
     setError(''); setNotice('')
+    try { if (typeof window !== 'undefined') window.localStorage.setItem(KEEP_KEY, keep ? '1' : '0') } catch { /* storage unavailable */ }
     if (!email || !password) { setError('Saisis ton e-mail et ton mot de passe.'); return }
     if (password.length < 6) { setError('Le mot de passe doit faire au moins 6 caractères.'); return }
     setBusy(true)
@@ -53,6 +55,13 @@ export default function AuthScreen() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <input type="email" autoCapitalize="none" autoCorrect="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" style={field} />
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mot de passe" onKeyDown={(e) => e.key === 'Enter' && submit()} style={field} />
+        </div>
+
+        <div onClick={() => setKeep((k) => !k)} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, cursor: 'pointer' }}>
+          <div style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: keep ? accent : 'transparent', border: '1.5px solid ' + (keep ? accent : 'rgba(255,255,255,0.25)') }}>
+            {keep && <svg width="14" height="14" viewBox="0 0 18 18"><path d="M3 9.5l4 4 8-9" fill="none" stroke="#000" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+          </div>
+          <span style={{ font: "600 14px 'Barlow Condensed'", letterSpacing: 0.3, color: 'rgba(255,255,255,0.8)' }}>Rester connecté</span>
         </div>
 
         {error && <div style={{ font: "600 13px 'Barlow Condensed'", color: '#FF5A3C', marginTop: 14 }}>{error}</div>}
