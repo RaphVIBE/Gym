@@ -1,32 +1,38 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c, ACCENT_DEFAULT, WEEKDAYS, todayWeekday, localDateStr, dateLabel } from './theme.js'
+import { quickSession, QUICK_LABELS } from './coach.js'
 import ProgramEditor from './ProgramEditor.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = {
   'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'],
 }
+const EXPRESS = [
+  { kind: 'short', label: 'SÉANCE COURTE', desc: '~25 min, l’essentiel' },
+  { kind: 'legs', label: 'FOCUS JAMBES', desc: 'Quadri, ischios, fessiers, mollets' },
+  { kind: 'upper', label: 'HAUT DU CORPS', desc: 'Poussée + tirage' },
+  { kind: 'cardio', label: 'CARDIO EXPRESS', desc: 'Condition & souffle' },
+  { kind: 'empty', label: 'SÉANCE LIBRE', desc: 'Pars de zéro, ajoute tes exos' },
+]
 const ytSearch = (n) => window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(n + ' technique musculation'), '_blank', 'noopener')
 
-// dates within the current Mon–Sun week
 function weekRange(d = new Date()) {
   const wd = todayWeekday(d)
   const mon = new Date(d); mon.setDate(d.getDate() - wd); mon.setHours(0, 0, 0, 0)
   const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
   return { mon, sun }
 }
-
 function computeStreak(dateSet) {
   let streak = 0
   const d = new Date(); d.setHours(0, 0, 0, 0)
-  if (!dateSet.has(localDateStr(d))) d.setDate(d.getDate() - 1) // allow "today not done yet"
+  if (!dateSet.has(localDateStr(d))) d.setDate(d.getDate() - 1)
   while (dateSet.has(localDateStr(d))) { streak++; d.setDate(d.getDate() - 1) }
   return streak
 }
 
-export default function MainApp({ session, profile, onProfileChange, onReonboard, onSignOut }) {
+export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const uid = session.user.id
   const accent = profile.accent || ACCENT_DEFAULT
   const name = (profile.display_name || 'ATHLETE').toUpperCase()
@@ -46,65 +52,73 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const [programId, setProgramId] = useState(null)
   const [programName, setProgramName] = useState('')
   const [programDays, setProgramDays] = useState([])
-  const [todayDay, setTodayDay] = useState(null)
+  const [templates, setTemplates] = useState([])     // non-rest days, startable any day
+  const [suggestion, setSuggestion] = useState(null)  // today's weekday slot
   const [exercises, setExercises] = useState([])
   const [workoutId, setWorkoutId] = useState(null)
+  const [sessionTitle, setSessionTitle] = useState('')
   const [weightHistory, setWeightHistory] = useState([])
   const [catalog, setCatalog] = useState([])
-  const [recentDates, setRecentDates] = useState([]) // performed_on strings, last 8 weeks
+  const [recentDates, setRecentDates] = useState([])
 
   const todayStr = localDateStr()
   const wd = todayWeekday()
+  const started = !!workoutId
 
   const mapWO = (r) => ({
     woExId: r.id, day_exercise_id: r.day_exercise_id, name: r.name, group: r.muscle_group,
     sets: r.sets, reps: r.reps, weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video,
     cues: r.cues || [], description: r.description || '', pattern: r.pattern || '', completed: r.completed,
   })
-  const mapDE = (r) => ({
-    woExId: null, day_exercise_id: r.id, name: r.name, group: r.muscle_group,
-    sets: r.sets, reps: r.reps, weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video,
-    cues: r.cues || [], description: r.description || '', pattern: r.pattern || '', completed: false,
+  const planFromDE = (r) => ({
+    day_exercise_id: r.id, name: r.name, group: r.muscle_group, pattern: r.pattern || '', description: r.description || '',
+    sets: r.sets, reps: r.reps, weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video, cues: r.cues || [],
   })
 
-  // ---- load everything ----
   useEffect(() => {
     let active = true
     setLoading(true)
     ;(async () => {
       const since = new Date(); since.setDate(since.getDate() - 56)
-      const [progRes, wRes, catRes, recRes] = await Promise.all([
+      const [progRes, catRes, wRes, recRes] = await Promise.all([
         supabase.from('programs').select('id,name').eq('user_id', uid).eq('is_active', true).maybeSingle(),
-        supabase.from('weight_log').select('weight,logged_at').eq('user_id', uid).order('logged_at'),
         supabase.from('exercises').select('*'),
+        supabase.from('weight_log').select('weight,logged_at').eq('user_id', uid).order('logged_at'),
         supabase.from('workouts').select('performed_on').eq('user_id', uid).gte('performed_on', localDateStr(since)),
       ])
       if (!active) return
       const prog = progRes.data
-      let days = [], today = null
+      let days = []
       if (prog) {
         const { data: dayRows } = await supabase.from('program_days').select('*').eq('program_id', prog.id).order('weekday')
         days = dayRows || []
-        today = days.find((d) => d.weekday === wd) || null
+        const ids = days.map((d) => d.id)
+        let exByDay = {}
+        if (ids.length) {
+          const { data: exRows } = await supabase.from('day_exercises').select('*').in('program_day_id', ids).order('position')
+          for (const e of exRows || []) (exByDay[e.program_day_id] ||= []).push(planFromDE(e))
+        }
+        days = days.map((d) => ({ ...d, exercises: exByDay[d.id] || [] }))
       }
-      // today's workout (snapshot) or the plan template
+      const tmpl = days.filter((d) => !d.is_rest)
+      const sugg = days.find((d) => d.weekday === wd) || null
+
       const { data: wo } = await supabase
-        .from('workouts').select('id, workout_exercises(*)').eq('user_id', uid).eq('performed_on', todayStr).maybeSingle()
-      let exs = [], wid = null
+        .from('workouts').select('id, title, workout_exercises(*)').eq('user_id', uid).eq('performed_on', todayStr).maybeSingle()
+      let exs = [], wid = null, stitle = ''
       if (wo) {
-        wid = wo.id
+        wid = wo.id; stitle = wo.title
         exs = (wo.workout_exercises || []).slice().sort((x, y) => x.position - y.position).map(mapWO)
-      } else if (today && !today.is_rest) {
-        const { data: de } = await supabase.from('day_exercises').select('*').eq('program_day_id', today.id).order('position')
-        exs = (de || []).map(mapDE)
       }
       if (!active) return
       setProgramId(prog?.id || null)
       setProgramName(prog?.name || '')
       setProgramDays(days)
-      setTodayDay(today)
+      setTemplates(tmpl)
+      setSuggestion(sugg)
       setExercises(exs)
       setWorkoutId(wid)
+      setSessionTitle(stitle)
       setWeightHistory((wRes.data || []).map((r) => Number(r.weight)))
       setCatalog(catRes.data || [])
       setRecentDates((recRes.data || []).map((r) => r.performed_on))
@@ -113,33 +127,45 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
     return () => { active = false }
   }, [uid, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- create today's workout from the current list (snapshot) ----
-  const createWorkout = useCallback(async (list) => {
+  // ---- start (or switch) today's session from a list ----
+  const startSession = async (list, title, programDayId) => {
+    if (workoutId) await supabase.from('workouts').delete().eq('id', workoutId)
     const { data: wo } = await supabase.from('workouts')
-      .insert({ user_id: uid, program_day_id: todayDay?.id ?? null, title: todayDay?.title || 'TRAINING', performed_on: todayStr })
+      .insert({ user_id: uid, program_day_id: programDayId ?? null, title, performed_on: todayStr })
       .select('id').single()
-    if (!wo) return null
+    if (!wo) return
+    const norm = list.map((e, i) => ({
+      day_exercise_id: e.day_exercise_id ?? null, name: e.name, group: e.group ?? e.muscle_group,
+      pattern: e.pattern || '', description: e.description || '', sets: e.sets, reps: e.reps,
+      weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues || [], position: i,
+    }))
     let created = []
-    if (list.length) {
-      const rows = list.map((e, i) => ({
-        workout_id: wo.id, user_id: uid, day_exercise_id: e.day_exercise_id ?? null, position: i,
-        name: e.name, muscle_group: e.group, pattern: e.pattern || '', description: e.description || '',
-        sets: e.sets, reps: e.reps, weight: e.weight,
-        rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, completed: e.completed,
+    if (norm.length) {
+      const rows = norm.map((e) => ({
+        workout_id: wo.id, user_id: uid, day_exercise_id: e.day_exercise_id, position: e.position,
+        name: e.name, muscle_group: e.group, pattern: e.pattern, description: e.description,
+        sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, completed: false,
       }))
       const { data } = await supabase.from('workout_exercises').insert(rows).select()
       created = (data || []).slice().sort((x, y) => x.position - y.position)
     }
     setWorkoutId(wo.id)
-    setExercises(list.map((e, i) => ({ ...e, woExId: created[i]?.id ?? null })))
+    setSessionTitle(title)
+    setExercises(norm.map((e, i) => ({
+      woExId: created[i]?.id ?? null, day_exercise_id: e.day_exercise_id, name: e.name, group: e.group,
+      pattern: e.pattern, description: e.description, sets: e.sets, reps: e.reps, weight: e.weight,
+      rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, completed: false,
+    })))
     setRecentDates((d) => (d.includes(todayStr) ? d : [...d, todayStr]))
-    return wo.id
-  }, [uid, todayDay, todayStr])
+    setVariant('focus'); setOverlay(null); setTab('train')
+  }
+
+  const startTemplate = (t) => startSession(t.exercises, t.title, t.id)
+  const startQuick = (kind) => startSession(quickSession(kind, profile, catalog), QUICK_LABELS[kind], null)
 
   const toggle = async (i) => {
     const nextList = exercises.map((e, k) => (k === i ? { ...e, completed: !e.completed } : e))
     setExercises(nextList)
-    if (!workoutId) { await createWorkout(nextList); return }
     const ex = nextList[i]
     if (ex.woExId) await supabase.from('workout_exercises').update({ completed: ex.completed }).eq('id', ex.woExId)
   }
@@ -147,21 +173,16 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const addFromCatalog = async (ex) => {
     setOverlay(null); setAddedName(ex.name)
     setTimeout(() => setAddedName(null), 1800)
-    const newEx = {
-      woExId: null, day_exercise_id: null, name: ex.name, group: ex.muscle_group,
-      pattern: ex.pattern || '', description: ex.description || '',
-      sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—',
-      rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], completed: false,
-    }
-    const nextList = [...exercises, newEx]
-    setExercises(nextList)
-    if (!workoutId) { await createWorkout(nextList); return }
     const { data } = await supabase.from('workout_exercises').insert({
-      workout_id: workoutId, user_id: uid, position: nextList.length - 1, name: newEx.name, muscle_group: newEx.group,
-      pattern: newEx.pattern, description: newEx.description,
-      sets: newEx.sets, reps: newEx.reps, weight: newEx.weight, rest: newEx.rest, tempo: newEx.tempo, video: newEx.video, cues: newEx.cues, completed: false,
+      workout_id: workoutId, user_id: uid, position: exercises.length, name: ex.name, muscle_group: ex.muscle_group,
+      pattern: ex.pattern || '', description: ex.description || '',
+      sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—', rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], completed: false,
     }).select('id').single()
-    setExercises((l) => l.map((e, idx) => (idx === l.length - 1 ? { ...e, woExId: data?.id ?? null } : e)))
+    setExercises((l) => [...l, {
+      woExId: data?.id ?? null, day_exercise_id: null, name: ex.name, group: ex.muscle_group, pattern: ex.pattern || '',
+      description: ex.description || '', sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—',
+      rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], completed: false,
+    }])
   }
 
   const saveWeight = async () => {
@@ -173,6 +194,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   }
 
   const goTab = (t) => { setTab(t); setOverlay(null) }
+  const openStart = () => setOverlay('start')
   const openDetail = (i) => { setSelected(i); setOverlay('detail') }
   const openAdd = () => { setOverlay('add'); setSearch(''); setCat('TOUS') }
   const openLog = () => { setOverlay('logweight'); setWeight(weightHistory.length ? String(weightHistory[weightHistory.length - 1]) : (profile.bodyweight ? String(profile.bodyweight) : '')) }
@@ -200,9 +222,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   }
 
   // ---- derived ----
-  const isRest = !!todayDay?.is_rest
-  const title = todayDay?.title || 'TRAINING'
-  const focus = todayDay?.focus || ''
+  const suggIsRest = !suggestion || suggestion.is_rest
+  const title = sessionTitle || ''
+  const titleLines = title.split(' ')
   const total = exercises.length
   const done = exercises.filter((e) => e.completed).length
   const pct = total ? done / total : 0
@@ -212,12 +234,10 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
     numColor: ex.completed ? accent : 'rgba(255,255,255,0.22)',
     nameColor: ex.completed ? 'rgba(255,255,255,0.4)' : '#fff', i,
   }))
-  const titleLines = title.split(' ')
 
   const ringCirc = 2 * Math.PI * 30
   const ringOffset = ringCirc * (1 - pct)
 
-  // this-week completion
   const { mon } = weekRange()
   const weekDoneWeekdays = new Set()
   for (const ds of recentDates) {
@@ -231,14 +251,13 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
       dayColor: st === 'today' ? accent : (d.is_rest ? 'rgba(255,255,255,0.3)' : '#fff'),
       focusColor: d.is_rest ? 'rgba(255,255,255,0.3)' : (st === 'today' ? '#fff' : 'rgba(255,255,255,0.7)'),
       stateColor: st === 'today' ? accent : (st === 'done' ? accent : 'rgba(255,255,255,0.35)'),
-      stateLabel: st === 'today' ? 'AUJ.' : (st === 'done' ? 'FAIT' : (d.is_rest ? 'REPOS' : 'PRÉVU')),
+      stateLabel: st === 'today' ? 'AUJ.' : (st === 'done' ? 'FAIT' : (d.is_rest ? 'REPOS' : 'SUGGÉRÉ')),
     }
   })
 
   const sel = exercises[selected] || exercises[0] || null
   const sets = sel ? Array.from({ length: sel.sets }, (_, k) => ({ n: 'SÉRIE ' + (k + 1), reps: sel.reps, weight: sel.weight })) : []
 
-  // body weight chart (guard small histories)
   const hist = weightHistory
   const bodyWeight = hist.length ? hist[hist.length - 1] : (profile.bodyweight || 0)
   const chartPts = hist.length >= 2 ? hist : (hist.length === 1 ? [hist[0], hist[0]] : [])
@@ -256,13 +275,12 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
     areaPath = 'M0,' + H + ' ' + pts.map((p) => 'L' + p[0] + ',' + p[1]).join(' ') + ' L' + W + ',' + H + ' Z'
   }
 
-  // sessions / week bars (last 8 weeks)
   const bars = []
   for (let i = 7; i >= 0; i--) {
     const ref = new Date(); ref.setDate(ref.getDate() - i * 7)
     const { mon: m, sun: s } = weekRange(ref)
     const count = recentDates.filter((ds) => { const d = new Date(ds + 'T00:00:00'); return d >= m && d <= s }).length
-    bars.push({ count, label: 'W' + (8 - i) })
+    bars.push({ count, label: 'S' + (8 - i) })
   }
   const maxBar = Math.max(5, ...bars.map((b) => b.count))
   const barViews = bars.map((b, i) => ({
@@ -297,14 +315,12 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const sessionMin = Math.round(Math.max(total, 1) * 8.5)
   const progressPctStr = Math.round(pct * 100) + '%'
 
-  const cc = { c, accent }
-
   return (
     <PhoneFrame>
       <div style={{ position: 'relative', height: '100%', overflow: 'hidden', background: '#0A0A0A', color: '#fff', fontFamily: "'Barlow Condensed', sans-serif" }}>
         <div style={{ height: '100%', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
 
-          {/* ============ HOME ============ */}
+          {/* ============ ACCUEIL ============ */}
           {tab === 'home' && (
             <div style={{ padding: '60px 20px 130px', animation: 'fadeUp .4s' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 26 }}>
@@ -316,28 +332,28 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
               </div>
 
               {/* hero today card */}
-              <div onClick={() => goTab('train')} style={{ position: 'relative', borderRadius: 24, overflow: 'hidden', background: '#101010', border: '1px solid ' + c.hair9, padding: 22, marginBottom: 20, cursor: 'pointer' }}>
+              <div onClick={() => (started ? goTab('train') : openStart())} style={{ position: 'relative', borderRadius: 24, overflow: 'hidden', background: '#101010', border: '1px solid ' + c.hair9, padding: 22, marginBottom: 20, cursor: 'pointer' }}>
                 <div style={{ position: 'absolute', top: -40, right: -40, width: 180, height: 180, borderRadius: '50%', background: `radial-gradient(circle, ${accent} 0%, transparent 70%)`, opacity: 0.12 }} />
                 <div style={{ position: 'relative' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent }} />{isRest ? 'JOUR DE REPOS' : 'SÉANCE DU JOUR'}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent }} />{started ? 'SÉANCE EN COURS' : 'SÉANCE DU JOUR'}</div>
                     <span style={{ fontFamily: c.bebas, fontSize: 22, color: 'rgba(255,255,255,0.3)' }}>→</span>
                   </div>
-                  <div style={{ fontFamily: c.bebas, fontSize: 60, lineHeight: 0.84, margin: '16px 0 8px' }}>{isRest ? 'RÉCUP' : title}</div>
+                  <div style={{ fontFamily: c.bebas, fontSize: 56, lineHeight: 0.84, margin: '16px 0 8px' }}>{started ? title : (suggIsRest ? 'À TOI DE JOUER' : suggestion.title)}</div>
                   <div style={{ font: "600 14px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.5)' }}>
-                    {isRest ? 'REPOS & RÉCUP · MOBILITÉ EN OPTION' : `${focus} · ${total} EXOS · ${sessionMin} MIN`}
+                    {started ? `${total} EXOS · ${sessionMin} MIN` : (suggIsRest ? 'Choisis ta séance — entraîne-toi quand tu veux' : `SUGGÉRÉ · ${suggestion.exercises.length} EXOS`)}
                   </div>
-                  {!isRest && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 22 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 22 }}>
+                    {started ? (
                       <div style={{ flex: 1 }}>
                         <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
                           <div style={{ height: '100%', width: progressPctStr, background: accent, borderRadius: 3, transition: 'width .4s' }} />
                         </div>
                         <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.5)', marginTop: 7 }}>{done}/{total} TERMINÉS</div>
                       </div>
-                      <div style={{ background: accent, color: '#000', fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, padding: '11px 24px', borderRadius: 30 }}>DÉMARRER ▸</div>
-                    </div>
-                  )}
+                    ) : <div style={{ flex: 1 }} />}
+                    <div style={{ background: accent, color: '#000', fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, padding: '11px 24px', borderRadius: 30 }}>{started ? 'CONTINUER ▸' : 'CHOISIR ▸'}</div>
+                  </div>
                 </div>
               </div>
 
@@ -353,8 +369,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                 <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 1 }}>CETTE SEMAINE</div>
                 <div onClick={() => setShowEditor(true)} style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: accent, cursor: 'pointer' }}>MODIFIER ›</div>
               </div>
+              <div style={{ font: "500 12px 'Barlow Condensed'", letterSpacing: 0.5, color: c.faint, marginBottom: 4 }}>Créneaux suggérés — entraîne-toi le jour que tu veux.</div>
               {week.map((d, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid ' + c.hair }}>
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 0', borderBottom: '1px solid ' + c.hair }}>
                   <div style={{ width: 40, fontFamily: c.bebas, fontSize: 21, color: d.dayColor }}>{d.day}</div>
                   <div style={{ flex: 1, font: "600 15px 'Barlow Condensed'", letterSpacing: 0.5, color: d.focusColor }}>{d.focus}</div>
                   <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 1.5, color: d.stateColor }}>{d.stateLabel}</div>
@@ -363,80 +380,91 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
             </div>
           )}
 
-          {/* ============ TRAIN ============ */}
+          {/* ============ SÉANCE ============ */}
           {tab === 'train' && (
             <div style={{ padding: '60px 0 130px', animation: 'fadeUp .4s' }}>
               <div style={{ padding: '0 20px' }}>
                 <div style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}>{dateLabel()} · AUJOURD'HUI</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 8 }}>
-                  <div style={{ fontFamily: c.bebas, fontSize: 54, lineHeight: 0.82 }}>{isRest && total === 0 ? 'REPOS' : titleLines.map((l, k) => <span key={k}>{l}{k < titleLines.length - 1 && <br />}</span>)}</div>
-                  <svg width="78" height="78" viewBox="0 0 78 78" style={{ flexShrink: 0 }}>
-                    <circle cx="39" cy="39" r="30" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="6" />
-                    <circle cx="39" cy="39" r="30" fill="none" stroke={accent} strokeWidth="6" strokeLinecap="round" strokeDasharray={ringCirc.toFixed(1)} strokeDashoffset={ringOffset.toFixed(1)} transform="rotate(-90 39 39)" style={{ transition: 'stroke-dashoffset .5s' }} />
-                    <text x="39" y="38" textAnchor="middle" fill="#fff" fontFamily="Bebas Neue" fontSize="22">{done}</text>
-                    <text x="39" y="52" textAnchor="middle" fill={c.faint} fontFamily="Barlow Condensed" fontSize="11" letterSpacing="1">/ {total}</text>
-                  </svg>
+                  <div style={{ fontFamily: c.bebas, fontSize: 54, lineHeight: 0.82 }}>{started ? titleLines.map((l, k) => <span key={k}>{l}{k < titleLines.length - 1 && <br />}</span>) : 'SÉANCE'}</div>
+                  {started && (
+                    <svg width="78" height="78" viewBox="0 0 78 78" style={{ flexShrink: 0 }}>
+                      <circle cx="39" cy="39" r="30" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="6" />
+                      <circle cx="39" cy="39" r="30" fill="none" stroke={accent} strokeWidth="6" strokeLinecap="round" strokeDasharray={ringCirc.toFixed(1)} strokeDashoffset={ringOffset.toFixed(1)} transform="rotate(-90 39 39)" style={{ transition: 'stroke-dashoffset .5s' }} />
+                      <text x="39" y="38" textAnchor="middle" fill="#fff" fontFamily="Bebas Neue" fontSize="22">{done}</text>
+                      <text x="39" y="52" textAnchor="middle" fill={c.faint} fontFamily="Barlow Condensed" fontSize="11" letterSpacing="1">/ {total}</text>
+                    </svg>
+                  )}
                 </div>
               </div>
 
-              {total > 0 && (
-                <div style={{ display: 'flex', gap: 5, background: '#141414', borderRadius: 30, padding: 5, margin: '20px 20px', border: '1px solid ' + c.hair }}>
-                  {['focus', 'list'].map((v) => (
-                    <div key={v} onClick={() => setVariant(v)} style={{ flex: 1, textAlign: 'center', padding: 9, borderRadius: 24, fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, cursor: 'pointer', background: variant === v ? accent : 'transparent', color: variant === v ? '#000' : 'rgba(255,255,255,0.5)', transition: 'all .2s' }}>{v === 'focus' ? 'DÉTAIL' : 'LISTE'}</div>
-                  ))}
+              {!started && (
+                <div style={{ padding: '40px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
+                  <div style={{ width: 64, height: 64, borderRadius: '50%', border: '2px dashed rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 40, color: c.faint }}>+</div>
+                  <div style={{ textAlign: 'center', font: "500 14px 'Barlow Condensed'", letterSpacing: 0.5, color: c.faint }}>Aucune séance lancée aujourd'hui.<br />Choisis-en une pour commencer.</div>
+                  <div onClick={openStart} style={{ background: accent, color: '#000', borderRadius: 30, padding: '14px 28px', fontFamily: c.bebas, fontSize: 22, letterSpacing: 1.5, cursor: 'pointer' }}>+ CHOISIR MA SÉANCE</div>
                 </div>
               )}
 
-              {total === 0 && (
-                <div style={{ padding: '30px 20px 6px', textAlign: 'center', font: "500 14px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>
-                  {isRest ? "Jour de repos prévu. Ajoute des exos pour t'entraîner quand même." : 'Aucun exercice. Ajoutes-en pour commencer.'}
-                </div>
-              )}
+              {started && (
+                <>
+                  <div style={{ display: 'flex', gap: 5, background: '#141414', borderRadius: 30, padding: 5, margin: '20px 20px', border: '1px solid ' + c.hair }}>
+                    {['focus', 'list'].map((v) => (
+                      <div key={v} onClick={() => setVariant(v)} style={{ flex: 1, textAlign: 'center', padding: 9, borderRadius: 24, fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, cursor: 'pointer', background: variant === v ? accent : 'transparent', color: variant === v ? '#000' : 'rgba(255,255,255,0.5)', transition: 'all .2s' }}>{v === 'focus' ? 'DÉTAIL' : 'LISTE'}</div>
+                    ))}
+                  </div>
 
-              {variant === 'focus' && total > 0 && (
-                <div style={{ padding: '0 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {exs.map((ex) => (
-                    <div key={ex.i} onClick={() => openDetail(ex.i)} style={{ position: 'relative', background: '#141414', border: '1px solid ' + c.hair7, borderRadius: 18, padding: 18, cursor: 'pointer', overflow: 'hidden' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 13 }}>
-                        <div style={{ fontFamily: c.bebas, fontSize: 42, lineHeight: 0.72, color: ex.numColor, width: 44, flexShrink: 0 }}>{ex.num}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontFamily: c.bebas, fontSize: 27, lineHeight: 0.92, color: ex.nameColor }}>{ex.name}</div>
-                          <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, marginTop: 4 }}>{ex.group}</div>
+                  {total === 0 && (
+                    <div style={{ padding: '10px 20px 6px', textAlign: 'center', font: "500 14px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>Séance libre — ajoute tes exercices.</div>
+                  )}
+
+                  {variant === 'focus' && (
+                    <div style={{ padding: '0 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {exs.map((ex) => (
+                        <div key={ex.i} onClick={() => openDetail(ex.i)} style={{ position: 'relative', background: '#141414', border: '1px solid ' + c.hair7, borderRadius: 18, padding: 18, cursor: 'pointer', overflow: 'hidden' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 13 }}>
+                            <div style={{ fontFamily: c.bebas, fontSize: 42, lineHeight: 0.72, color: ex.numColor, width: 44, flexShrink: 0 }}>{ex.num}</div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontFamily: c.bebas, fontSize: 27, lineHeight: 0.92, color: ex.nameColor }}>{ex.name}</div>
+                              <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, marginTop: 4 }}>{ex.group}</div>
+                            </div>
+                            <Check completed={ex.completed} accent={accent} size={38} onClick={(e) => { e.stopPropagation(); toggle(ex.i) }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: 22, marginTop: 16, paddingTop: 14, borderTop: '1px solid ' + c.hair }}>
+                            <Metric value={ex.scheme} label="SÉRIES × RÉPS" />
+                            <Metric value={ex.weight} label="CHARGE" />
+                            <Metric value={ex.rest} label="REPOS" />
+                          </div>
                         </div>
-                        <Check completed={ex.completed} accent={accent} size={38} onClick={(e) => { e.stopPropagation(); toggle(ex.i) }} />
-                      </div>
-                      <div style={{ display: 'flex', gap: 22, marginTop: 16, paddingTop: 14, borderTop: '1px solid ' + c.hair }}>
-                        <Metric value={ex.scheme} label="SÉRIES × RÉPS" />
-                        <Metric value={ex.weight} label="CHARGE" />
-                        <Metric value={ex.rest} label="REPOS" />
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              {variant === 'list' && total > 0 && (
-                <div style={{ padding: '0 20px' }}>
-                  {exs.map((ex) => (
-                    <div key={ex.i} onClick={() => openDetail(ex.i)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0', borderBottom: '1px solid ' + c.hair7, cursor: 'pointer' }}>
-                      <Check completed={ex.completed} accent={accent} square onClick={(e) => { e.stopPropagation(); toggle(ex.i) }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ font: "600 18px 'Barlow Condensed'", letterSpacing: 0.3, lineHeight: 1.05, color: ex.nameColor }}>{ex.name}</div>
-                        <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, marginTop: 2 }}>{ex.group}</div>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontFamily: c.bebas, fontSize: 23, lineHeight: 0.9 }}>{ex.scheme}</div>
-                        <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>{ex.weight}</div>
-                      </div>
-                      <span style={{ fontFamily: c.bebas, fontSize: 18, color: 'rgba(255,255,255,0.25)', flexShrink: 0 }}>›</span>
+                  {variant === 'list' && (
+                    <div style={{ padding: '0 20px' }}>
+                      {exs.map((ex) => (
+                        <div key={ex.i} onClick={() => openDetail(ex.i)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0', borderBottom: '1px solid ' + c.hair7, cursor: 'pointer' }}>
+                          <Check completed={ex.completed} accent={accent} square onClick={(e) => { e.stopPropagation(); toggle(ex.i) }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ font: "600 18px 'Barlow Condensed'", letterSpacing: 0.3, lineHeight: 1.05, color: ex.nameColor }}>{ex.name}</div>
+                            <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, marginTop: 2 }}>{ex.group}</div>
+                          </div>
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <div style={{ fontFamily: c.bebas, fontSize: 23, lineHeight: 0.9 }}>{ex.scheme}</div>
+                            <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>{ex.weight}</div>
+                          </div>
+                          <span style={{ fontFamily: c.bebas, fontSize: 18, color: 'rgba(255,255,255,0.25)', flexShrink: 0 }}>›</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              <div style={{ padding: '16px 20px 0' }}>
-                <div onClick={openAdd} style={{ border: '1.5px dashed rgba(255,255,255,0.2)', borderRadius: 16, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>+ AJOUTER UN EXERCICE</div>
-              </div>
+                  <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div onClick={openAdd} style={{ border: '1.5px dashed rgba(255,255,255,0.2)', borderRadius: 16, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>+ AJOUTER UN EXERCICE</div>
+                    <div onClick={openStart} style={{ textAlign: 'center', font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, cursor: 'pointer', padding: 4 }}>CHANGER DE SÉANCE</div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -502,7 +530,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                 <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TOUCHE POUR AJOUTER</div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                {['WK 1', 'WK 4', 'WK 8'].map((ph, i) => (<PhotoSlot key={i} label={ph} />))}
+                {['SEM 1', 'SEM 4', 'SEM 8'].map((ph, i) => (<PhotoSlot key={i} label={ph} />))}
               </div>
             </div>
           )}
@@ -529,7 +557,55 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           </NavItem>
         </div>
 
-        {/* ============ DETAIL OVERLAY ============ */}
+        {/* ============ START PICKER ============ */}
+        {overlay === 'start' && (
+          <div onClick={closeOverlay} style={{ position: 'absolute', inset: 0, zIndex: 88, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end', animation: 'overlayIn .25s' }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxHeight: '88%', overflowY: 'auto', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '20px 20px 36px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
+              <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 18px' }} />
+              <div style={{ fontFamily: c.bebas, fontSize: 32, letterSpacing: 0.5, marginBottom: 16 }}>DÉMARRER UNE SÉANCE</div>
+
+              {suggestion && !suggestion.is_rest && (
+                <div onClick={() => startTemplate(suggestion)} style={{ background: accent, color: '#000', borderRadius: 16, padding: '15px 18px', marginBottom: 16, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ font: "700 10px 'Barlow Condensed'", letterSpacing: 1.5, opacity: 0.65 }}>SUGGÉRÉ AUJOURD'HUI</div>
+                    <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 0.5 }}>{suggestion.title}</div>
+                    <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1, opacity: 0.7 }}>{suggestion.exercises.length} EXERCICES</div>
+                  </div>
+                  <span style={{ fontFamily: c.bebas, fontSize: 30 }}>▸</span>
+                </div>
+              )}
+
+              {templates.length > 0 && (
+                <>
+                  <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint, margin: '6px 0 8px' }}>TON PROGRAMME</div>
+                  {templates.map((t, i) => (
+                    <div key={t.id} onClick={() => startTemplate(t)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: '1px solid ' + c.hair, cursor: 'pointer' }}>
+                      <div style={{ width: 34, height: 34, borderRadius: 10, background: '#1f1f1f', border: '1px solid ' + c.hair9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 18, color: accent, flexShrink: 0 }}>{String.fromCharCode(65 + i)}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 0.3 }}>{t.title}</div>
+                        <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>{t.focus} · {t.exercises.length} exos</div>
+                      </div>
+                      <span style={{ fontFamily: c.bebas, fontSize: 20, color: 'rgba(255,255,255,0.3)' }}>▸</span>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint, margin: '18px 0 8px' }}>SÉANCES EXPRESS</div>
+              {EXPRESS.map((e) => (
+                <div key={e.kind} onClick={() => startQuick(e.kind)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: '1px solid ' + c.hair, cursor: 'pointer' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 0.3 }}>{e.label}</div>
+                    <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 0.5, color: c.faint }}>{e.desc}</div>
+                  </div>
+                  <span style={{ fontFamily: c.bebas, fontSize: 20, color: 'rgba(255,255,255,0.3)' }}>▸</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============ DÉTAIL EXERCICE ============ */}
         {overlay === 'detail' && sel && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 85, background: '#0A0A0A', overflowY: 'auto', animation: 'overlayIn .25s' }}>
             <div style={{ position: 'relative', height: 250, background: 'radial-gradient(circle at 50% 35%, #15170d 0%, #0d0d0d 70%)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid ' + c.hair9 }}>
@@ -594,7 +670,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           </div>
         )}
 
-        {/* ============ ADD OVERLAY ============ */}
+        {/* ============ AJOUTER UN EXERCICE ============ */}
         {overlay === 'add' && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 85, background: '#0A0A0A', overflowY: 'auto', animation: 'overlayIn .25s' }}>
             <div style={{ padding: '54px 20px 14px', position: 'sticky', top: 0, background: '#0A0A0A', zIndex: 2 }}>
@@ -630,7 +706,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           </div>
         )}
 
-        {/* ============ LOG WEIGHT SHEET ============ */}
+        {/* ============ PESÉE ============ */}
         {overlay === 'logweight' && (
           <div onClick={closeOverlay} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end', animation: 'overlayIn .25s' }}>
             <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '24px 20px 40px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
@@ -645,13 +721,14 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           </div>
         )}
 
-        {/* ============ ACCOUNT MENU ============ */}
+        {/* ============ MENU COMPTE ============ */}
         {overlay === 'menu' && (
           <div onClick={closeOverlay} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end', animation: 'overlayIn .25s' }}>
             <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '24px 20px 40px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
               <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 18px' }} />
               <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint }}>{session.user.email}</div>
               <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 0.5, marginTop: 2, marginBottom: 18 }}>{programName || 'AUCUN PROGRAMME'}</div>
+              {started && <MenuRow label="CHANGER DE SÉANCE" onClick={() => setOverlay('start')} accent={accent} />}
               <MenuRow label="MODIFIER LE PROGRAMME" onClick={() => { setOverlay(null); setShowEditor(true) }} accent={accent} />
               <MenuRow label="REGÉNÉRER AVEC LE COACH" onClick={() => { setOverlay(null); onReonboard() }} accent={accent} />
               <MenuRow label="DÉCONNEXION" onClick={onSignOut} danger />

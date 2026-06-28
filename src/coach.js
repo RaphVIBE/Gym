@@ -211,3 +211,56 @@ export async function persistProgram(supabase, userId, program) {
 }
 
 export { WEEKDAY_LABELS }
+
+// ---- quick / express sessions (started ad-hoc on the day) ----
+export const QUICK_LABELS = {
+  short: 'SÉANCE COURTE',
+  legs: 'FOCUS JAMBES',
+  upper: 'HAUT DU CORPS',
+  cardio: 'CARDIO EXPRESS',
+  empty: 'SÉANCE LIBRE',
+}
+
+const QUICK_DEFS = {
+  short: { patterns: ['squat', 'push', 'pull', 'core'], goal: null },
+  legs: { patterns: ['squat', 'hinge', 'lunge', 'calf', 'core'], goal: null },
+  upper: { patterns: ['push', 'pull', 'push', 'pull', 'core'], goal: null },
+  cardio: { patterns: ['conditioning', 'conditioning', 'core'], goal: 'conditioning' },
+}
+
+// Build a one-off session (returns the same exercise shape as a generated day).
+export function quickSession(kind, profile, catalog) {
+  if (kind === 'empty') return []
+  const def = QUICK_DEFS[kind]
+  if (!def) return []
+  const goal = def.goal || profile.goal || 'general'
+  const scheme = GOAL_SCHEME[goal] || GOAL_SCHEME.general
+  const allowedEquip = EQUIPMENT_SETS[profile.equipment] || EQUIPMENT_SETS.full_gym
+  const diffCap = profile.experience === 'beginner' ? 2 : 3
+  const usable = catalog.filter((e) => allowedEquip.includes(e.equipment) && e.difficulty <= diffCap)
+  const byPattern = {}
+  for (const e of usable) (byPattern[e.pattern] ||= []).push(e)
+  for (const k in byPattern) byPattern[k] = shuffle(byPattern[k])
+
+  const used = new Set()
+  const out = []
+  let pos = 0
+  for (const pattern of def.patterns) {
+    const pool = (byPattern[pattern] || []).filter((e) => !used.has(e.id))
+    if (!pool.length) continue
+    const ex = pool[0]
+    used.add(ex.id)
+    const isCompound = COMPOUND_PATTERNS.includes(pattern)
+    const reps = pattern === 'conditioning' || pattern === 'core'
+      ? ex.default_reps : (isCompound ? scheme.compoundReps : ex.default_reps)
+    let sets = pattern === 'conditioning' ? 1 : (isCompound ? scheme.sets : Math.max(3, scheme.sets - 1))
+    if (kind === 'short') sets = Math.max(2, sets - 1)
+    out.push({
+      exercise_id: ex.id, name: ex.name, muscle_group: ex.muscle_group, pattern: ex.pattern,
+      description: ex.description || '', sets, reps, weight: estimateLoad(ex, profile, scheme),
+      rest: pattern === 'conditioning' ? '1:00' : scheme.rest, tempo: scheme.tempo,
+      video: ex.name, cues: ex.cues || [], position: pos++,
+    })
+  }
+  return out
+}
