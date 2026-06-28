@@ -62,6 +62,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const [weightHistory, setWeightHistory] = useState([])
   const [catalog, setCatalog] = useState([])
   const [recentDates, setRecentDates] = useState([])
+  const [volumeRows, setVolumeRows] = useState([])
 
   const todayStr = localDateStr()
   const wd = todayWeekday()
@@ -87,7 +88,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
         supabase.from('programs').select('id,name').eq('user_id', uid).eq('is_active', true).maybeSingle(),
         supabase.from('exercises').select('*'),
         supabase.from('weight_log').select('weight,logged_at').eq('user_id', uid).order('logged_at'),
-        supabase.from('workouts').select('performed_on').eq('user_id', uid).gte('performed_on', localDateStr(since)),
+        supabase.from('workouts').select('id, performed_on').eq('user_id', uid).gte('performed_on', localDateStr(since)),
       ])
       if (!active) return
       const prog = progRes.data
@@ -113,7 +114,17 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
         wid = wo.id; stitle = wo.title
         exs = (wo.workout_exercises || []).slice().sort((x, y) => x.position - y.position).map(mapWO)
       }
+      // logged sets across recent workouts → weekly volume
+      const recentWk = recRes.data || []
+      let volRows = []
+      const woIds = recentWk.map((w) => w.id)
+      if (woIds.length) {
+        const { data: weRows } = await supabase.from('workout_exercises').select('workout_id, set_log').in('workout_id', woIds)
+        const dateById = Object.fromEntries(recentWk.map((w) => [w.id, w.performed_on]))
+        volRows = (weRows || []).map((r) => ({ date: dateById[r.workout_id], setLog: Array.isArray(r.set_log) ? r.set_log : [] }))
+      }
       if (!active) return
+      setVolumeRows(volRows)
       setProgramId(prog?.id || null)
       setProgramName(prog?.name || '')
       setProgramDays(days)
@@ -188,6 +199,31 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const persistExercise = (exIndex) => {
     const e = exercises[exIndex]
     if (e?.woExId) supabase.from('workout_exercises').update({ set_log: e.setLog, completed: e.completed }).eq('id', e.woExId).then(() => {})
+  }
+
+  // ---- edit the live session ----
+  const removeExercise = async (i) => {
+    const ex = exercises[i]
+    setExercises((list) => list.filter((_, k) => k !== i))
+    setOverlay(null)
+    setSelected((s) => Math.max(0, s > i ? s - 1 : s))
+    if (ex?.woExId) await supabase.from('workout_exercises').delete().eq('id', ex.woExId)
+  }
+  const addSet = (i) => {
+    const ex = exercises[i]
+    if (!ex) return
+    const last = ex.setLog[ex.setLog.length - 1] || { reps: ex.reps, weight: ex.weight }
+    const setLog = [...ex.setLog, { reps: last.reps, weight: last.weight, done: false }]
+    setExercises((list) => list.map((e, k) => (k === i ? { ...e, setLog, sets: setLog.length, completed: false } : e)))
+    if (ex.woExId) supabase.from('workout_exercises').update({ set_log: setLog, sets: setLog.length, completed: false }).eq('id', ex.woExId).then(() => {})
+  }
+  const removeSet = (i) => {
+    const ex = exercises[i]
+    if (!ex || ex.setLog.length <= 1) return
+    const setLog = ex.setLog.slice(0, -1)
+    const completed = setLog.every((s) => s.done)
+    setExercises((list) => list.map((e, k) => (k === i ? { ...e, setLog, sets: setLog.length, completed } : e)))
+    if (ex.woExId) supabase.from('workout_exercises').update({ set_log: setLog, sets: setLog.length, completed }).eq('id', ex.woExId).then(() => {})
   }
 
   const addFromCatalog = async (ex) => {
@@ -310,6 +346,32 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     h: Math.round((b.count / maxBar) * 100) + '%', label: b.label,
     barColor: i === bars.length - 1 ? accent : 'rgba(255,255,255,0.18)',
   }))
+
+  // weekly training volume (tonnage) from logged sets
+  const volBars = []
+  for (let i = 7; i >= 0; i--) {
+    const ref = new Date(); ref.setDate(ref.getDate() - i * 7)
+    const { mon: m, sun: s } = weekRange(ref)
+    let vol = 0
+    for (const r of volumeRows) {
+      if (!r.date) continue
+      const d = new Date(r.date + 'T00:00:00')
+      if (d < m || d > s) continue
+      for (const st of r.setLog || []) {
+        const wv = parseFloat(String(st.weight).replace(',', '.'))
+        const rv = parseFloat(String(st.reps))
+        if (!isNaN(wv) && !isNaN(rv)) vol += wv * rv
+      }
+    }
+    volBars.push({ vol, label: 'S' + (8 - i) })
+  }
+  const maxVol = Math.max(1, ...volBars.map((b) => b.vol))
+  const volViews = volBars.map((b, i) => ({
+    h: Math.round((b.vol / maxVol) * 100) + '%', label: b.label,
+    barColor: i === volBars.length - 1 ? accent : 'rgba(255,255,255,0.18)',
+  }))
+  const volThisWeek = volBars[volBars.length - 1].vol
+  const anyVol = volBars.some((b) => b.vol > 0)
 
   const dateSet = new Set(recentDates)
   const streak = computeStreak(dateSet)
@@ -549,6 +611,25 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
+                <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1 }}>VOLUME / SEMAINE</div>
+                <div style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 1, color: accent }}>{(volThisWeek / 1000).toFixed(1)} T CETTE SEM.</div>
+              </div>
+              <div style={{ background: '#141414', border: '1px solid ' + c.hair, borderRadius: 18, padding: '18px 16px 12px', marginBottom: 24 }}>
+                {anyVol ? (
+                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 7, height: 90 }}>
+                    {volViews.map((b, i) => (
+                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, height: '100%', justifyContent: 'flex-end' }}>
+                        <div style={{ width: '100%', height: b.h, minHeight: 2, borderRadius: 5, background: b.barColor, transition: 'height .4s' }} />
+                        <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 0.5, color: 'rgba(255,255,255,0.35)' }}>{b.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', font: "500 13px 'Barlow Condensed'", letterSpacing: 0.5, color: c.faint }}>Note tes charges pendant la séance pour suivre ton volume (séries × réps × poids).</div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
                 <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1 }}>PHOTOS DE PROGRÈS</div>
                 <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TOUCHE POUR AJOUTER</div>
               </div>
@@ -687,6 +768,11 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                 ))}
               </div>
 
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <div onClick={() => removeSet(selected)} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '11px', fontFamily: c.bebas, fontSize: 17, letterSpacing: 1, color: selSetLog.length > 1 ? '#fff' : 'rgba(255,255,255,0.25)', cursor: selSetLog.length > 1 ? 'pointer' : 'default' }}>− SÉRIE</div>
+                <div onClick={() => addSet(selected)} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '11px', fontFamily: c.bebas, fontSize: 17, letterSpacing: 1, color: accent, cursor: 'pointer' }}>+ SÉRIE (INTENSIFIER)</div>
+              </div>
+
               <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>CONSEILS D'EXÉCUTION</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
                 {(sel.cues || []).map((cue, i) => (
@@ -696,6 +782,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                   </div>
                 ))}
               </div>
+              <div onClick={() => removeExercise(selected)} style={{ marginTop: 26, textAlign: 'center', font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: '#FF5A3C', cursor: 'pointer' }}>RETIRER DE LA SÉANCE</div>
             </div>
 
             <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 20px 30px', background: 'linear-gradient(transparent,#0A0A0A 30%)' }}>
