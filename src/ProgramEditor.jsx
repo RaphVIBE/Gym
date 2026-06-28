@@ -3,8 +3,8 @@ import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c, WEEKDAYS } from './theme.js'
 
-const CAT_CHIPS = ['ALL', 'PUSH', 'PULL', 'LEGS', 'CORE', 'CARDIO']
-const CAT_PATTERNS = { PUSH: ['push'], PULL: ['pull'], LEGS: ['squat', 'hinge', 'lunge', 'calf'], CORE: ['core'], CARDIO: ['conditioning'] }
+const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
+const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'] }
 
 export default function ProgramEditor({ uid, accent, programId, catalog, onClose, onReonboard }) {
   const [loading, setLoading] = useState(true)
@@ -12,7 +12,7 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
   const [days, setDays] = useState([])
   const [picker, setPicker] = useState(null) // { dayId }
   const [search, setSearch] = useState('')
-  const [cat, setCat] = useState('ALL')
+  const [cat, setCat] = useState('TOUS')
 
   useEffect(() => {
     let active = true
@@ -54,7 +54,8 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
     const position = day ? day.exercises.length : 0
     const row = {
       program_day_id: dayId, user_id: uid, position, exercise_id: ex.id, name: ex.name,
-      muscle_group: ex.muscle_group, sets: 3, reps: ex.default_reps,
+      muscle_group: ex.muscle_group, pattern: ex.pattern || '', description: ex.description || '',
+      sets: 3, reps: ex.default_reps,
       weight: ex.equipment === 'bodyweight' ? 'BW' : '—', rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [],
     }
     const { data } = await supabase.from('day_exercises').insert(row).select().single()
@@ -85,17 +86,17 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
               <div onClick={onClose} style={{ width: 40, height: 40, borderRadius: '50%', background: '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
                 <svg width="11" height="18" viewBox="0 0 11 18"><path d="M9 2L2 9l7 7" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </div>
-              <div style={{ fontFamily: c.bebas, fontSize: 34, letterSpacing: 1 }}>EDIT PROGRAM</div>
+              <div style={{ fontFamily: c.bebas, fontSize: 34, letterSpacing: 1 }}>MODIFIER LE PROGRAMME</div>
             </div>
 
             {!programId ? (
               <div style={{ marginTop: 30, textAlign: 'center' }}>
-                <div style={{ font: "500 14px 'Barlow Condensed'", color: c.faint, marginBottom: 20 }}>No active program yet.</div>
-                <div onClick={onReonboard} style={{ background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>BUILD ONE WITH COACH ▸</div>
+                <div style={{ font: "500 14px 'Barlow Condensed'", color: c.faint, marginBottom: 20 }}>Aucun programme actif.</div>
+                <div onClick={onReonboard} style={{ background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>EN CRÉER UN AVEC LE COACH ▸</div>
               </div>
             ) : (
               <>
-                <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint, marginBottom: 6 }}>PROGRAM NAME</div>
+                <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint, marginBottom: 6 }}>NOM DU PROGRAMME</div>
                 <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName}
                   style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: c.bebas, fontSize: 24, letterSpacing: 0.5, outline: 'none', marginBottom: 22 }} />
 
@@ -103,10 +104,10 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
                   <div key={day.id} style={{ marginBottom: 16, background: '#101010', border: '1px solid ' + c.hair9, borderRadius: 18, padding: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: day.is_rest ? 0 : 12 }}>
                       <div style={{ width: 38, fontFamily: c.bebas, fontSize: 22, color: accent }}>{WEEKDAYS[day.weekday]}</div>
-                      <input value={day.is_rest ? 'REST' : day.title} disabled={day.is_rest}
+                      <input value={day.is_rest ? 'REPOS' : day.title} disabled={day.is_rest}
                         onChange={(e) => setDayTitle(day.id, e.target.value.toUpperCase())} onBlur={(e) => saveTitle(day.id, e.target.value.toUpperCase())}
                         style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: day.is_rest ? c.faint : '#fff', fontFamily: c.bebas, fontSize: 22, letterSpacing: 0.5 }} />
-                      <div onClick={() => toggleRest(day)} style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 20, fontFamily: c.bebas, fontSize: 14, letterSpacing: 1, cursor: 'pointer', background: day.is_rest ? accent : 'transparent', color: day.is_rest ? '#000' : c.faint, border: '1px solid ' + (day.is_rest ? accent : 'rgba(255,255,255,0.14)') }}>REST</div>
+                      <div onClick={() => toggleRest(day)} style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 20, fontFamily: c.bebas, fontSize: 14, letterSpacing: 1, cursor: 'pointer', background: day.is_rest ? accent : 'transparent', color: day.is_rest ? '#000' : c.faint, border: '1px solid ' + (day.is_rest ? accent : 'rgba(255,255,255,0.14)') }}>REPOS</div>
                     </div>
 
                     {!day.is_rest && (
@@ -122,13 +123,13 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
                             </div>
                           </div>
                         ))}
-                        <div onClick={() => { setPicker({ dayId: day.id }); setSearch(''); setCat('ALL') }} style={{ marginTop: 10, border: '1.5px dashed rgba(255,255,255,0.18)', borderRadius: 12, padding: 10, textAlign: 'center', fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>+ ADD EXERCISE</div>
+                        <div onClick={() => { setPicker({ dayId: day.id }); setSearch(''); setCat('TOUS') }} style={{ marginTop: 10, border: '1.5px dashed rgba(255,255,255,0.18)', borderRadius: 12, padding: 10, textAlign: 'center', fontFamily: c.bebas, fontSize: 16, letterSpacing: 1, color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>+ AJOUTER</div>
                       </>
                     )}
                   </div>
                 ))}
 
-                <div onClick={onReonboard} style={{ marginTop: 8, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', color: accent, borderRadius: 30, padding: 15, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, cursor: 'pointer' }}>↻ REBUILD WITH COACH</div>
+                <div onClick={onReonboard} style={{ marginTop: 8, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', color: accent, borderRadius: 30, padding: 15, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, cursor: 'pointer' }}>↻ REGÉNÉRER AVEC LE COACH</div>
               </>
             )}
           </div>
@@ -142,9 +143,9 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
                 <div onClick={() => setPicker(null)} style={{ width: 40, height: 40, borderRadius: '50%', background: '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
                   <svg width="11" height="18" viewBox="0 0 11 18"><path d="M9 2L2 9l7 7" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
-                <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 1 }}>ADD TO {WEEKDAYS[days.find((d) => d.id === picker.dayId)?.weekday] || ''}</div>
+                <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 1 }}>AJOUTER À {WEEKDAYS[days.find((d) => d.id === picker.dayId)?.weekday] || ''}</div>
               </div>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search exercises…" style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: "'Barlow Condensed'", fontSize: 16, outline: 'none' }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un exercice…" style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: "'Barlow Condensed'", fontSize: 16, outline: 'none' }} />
               <div style={{ display: 'flex', gap: 7, marginTop: 12, overflowX: 'auto', paddingBottom: 2 }}>
                 {CAT_CHIPS.map((ch) => (
                   <div key={ch} onClick={() => setCat(ch)} style={{ flexShrink: 0, padding: '7px 16px', borderRadius: 30, fontFamily: c.bebas, fontSize: 15, letterSpacing: 1, cursor: 'pointer', background: cat === ch ? accent : 'transparent', color: cat === ch ? '#000' : 'rgba(255,255,255,0.55)', border: '1px solid ' + (cat === ch ? accent : 'rgba(255,255,255,0.14)') }}>{ch}</div>

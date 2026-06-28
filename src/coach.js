@@ -31,21 +31,21 @@ const FREQUENCY_PLAN = {
 
 // ---- pattern slots per day type ----
 const DAY_TEMPLATES = {
-  full: { title: 'FULL BODY', patterns: ['squat', 'hinge', 'push', 'pull', 'lunge', 'core'] },
-  upper: { title: 'UPPER BODY', patterns: ['push', 'pull', 'push', 'pull', 'core'] },
-  lower: { title: 'LOWER BODY', patterns: ['squat', 'hinge', 'lunge', 'calf', 'core'] },
-  push: { title: 'PUSH', patterns: ['push', 'push', 'push', 'push', 'core'] },
-  pull: { title: 'PULL', patterns: ['pull', 'pull', 'pull', 'pull', 'core'] },
-  legs: { title: 'LEGS', patterns: ['squat', 'hinge', 'lunge', 'calf', 'core'] },
+  full: { title: 'CORPS COMPLET', patterns: ['squat', 'hinge', 'push', 'pull', 'lunge', 'core'] },
+  upper: { title: 'HAUT DU CORPS', patterns: ['push', 'pull', 'push', 'pull', 'core'] },
+  lower: { title: 'BAS DU CORPS', patterns: ['squat', 'hinge', 'lunge', 'calf', 'core'] },
+  push: { title: 'POUSSÉE', patterns: ['push', 'push', 'push', 'push', 'core'] },
+  pull: { title: 'TIRAGE', patterns: ['pull', 'pull', 'pull', 'pull', 'core'] },
+  legs: { title: 'JAMBES', patterns: ['squat', 'hinge', 'lunge', 'calf', 'core'] },
 }
 
 // ---- goal → set / rest / tempo scheme ----
 const GOAL_SCHEME = {
-  strength: { focus: 'STRENGTH', sets: 5, rest: '3:00', tempo: '3-1-1', compoundReps: '5', finisher: false },
-  hypertrophy: { focus: 'HYPERTROPHY', sets: 4, rest: '1:30', tempo: '2-1-1', compoundReps: '8', finisher: false },
-  fat_loss: { focus: 'FAT LOSS', sets: 3, rest: '0:45', tempo: '2-0-1', compoundReps: '12', finisher: true },
-  conditioning: { focus: 'CONDITIONING', sets: 3, rest: '0:40', tempo: '2-0-1', compoundReps: '12', finisher: true },
-  general: { focus: 'GENERAL', sets: 3, rest: '1:30', tempo: '2-1-1', compoundReps: '8', finisher: false },
+  strength: { focus: 'FORCE', sets: 5, rest: '3:00', tempo: '3-1-1', compoundReps: '5', finisher: false },
+  hypertrophy: { focus: 'HYPERTROPHIE', sets: 4, rest: '1:30', tempo: '2-1-1', compoundReps: '8', finisher: false },
+  fat_loss: { focus: 'PERTE DE GRAS', sets: 3, rest: '0:45', tempo: '2-0-1', compoundReps: '12', finisher: true },
+  conditioning: { focus: 'CARDIO', sets: 3, rest: '0:40', tempo: '2-0-1', compoundReps: '12', finisher: true },
+  general: { focus: 'GÉNÉRAL', sets: 3, rest: '1:30', tempo: '2-1-1', compoundReps: '8', finisher: false },
 }
 
 // ---- estimated working load as a fraction of bodyweight ----
@@ -131,7 +131,7 @@ export function generateProgram(profile, catalog) {
   for (let w = 0; w <= 6; w++) {
     const idx = plan.days.indexOf(w)
     if (idx === -1) {
-      days.push({ weekday: w, title: 'REST', focus: '', is_rest: true, exercises: [] })
+      days.push({ weekday: w, title: 'REPOS', focus: '', is_rest: true, exercises: [] })
       continue
     }
     const type = plan.split[idx]
@@ -155,6 +155,8 @@ export function generateProgram(profile, catalog) {
         exercise_id: ex.id,
         name: ex.name,
         muscle_group: ex.muscle_group,
+        pattern: ex.pattern,
+        description: ex.description || '',
         sets: pattern === 'conditioning' ? 1 : (isCompound ? scheme.sets : Math.max(3, scheme.sets - 1)),
         reps,
         weight: estimateLoad(ex, profile, scheme),
@@ -168,9 +170,9 @@ export function generateProgram(profile, catalog) {
     days.push({ weekday: w, title: tpl.title, focus: scheme.focus, is_rest: false, exercises })
   }
 
-  const goalName = { strength: 'Strength', hypertrophy: 'Hypertrophy', fat_loss: 'Fat Loss', conditioning: 'Conditioning', general: 'General Fitness' }[goal]
+  const goalName = { strength: 'Force', hypertrophy: 'Hypertrophie', fat_loss: 'Perte de Gras', conditioning: 'Cardio', general: 'Forme Générale' }[goal]
   return {
-    name: `${freq}-Day ${goalName}`,
+    name: `${freq} jours · ${goalName}`,
     goal,
     days,
   }
@@ -197,6 +199,7 @@ export async function persistProgram(supabase, userId, program) {
       const rows = d.exercises.map((e) => ({
         program_day_id: day.id, user_id: userId, position: e.position,
         exercise_id: e.exercise_id, name: e.name, muscle_group: e.muscle_group,
+        pattern: e.pattern, description: e.description,
         sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo,
         video: e.video, cues: e.cues,
       }))

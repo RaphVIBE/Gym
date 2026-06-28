@@ -4,10 +4,11 @@ import { supabase } from './supabase.js'
 import { c, ACCENT_DEFAULT, WEEKDAYS, todayWeekday, localDateStr, dateLabel } from './theme.js'
 import ProgramEditor from './ProgramEditor.jsx'
 
-const CAT_CHIPS = ['ALL', 'PUSH', 'PULL', 'LEGS', 'CORE', 'CARDIO']
+const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = {
-  PUSH: ['push'], PULL: ['pull'], LEGS: ['squat', 'hinge', 'lunge', 'calf'], CORE: ['core'], CARDIO: ['conditioning'],
+  'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'],
 }
+const ytSearch = (n) => window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(n + ' technique musculation'), '_blank', 'noopener')
 
 // dates within the current Mon–Sun week
 function weekRange(d = new Date()) {
@@ -35,7 +36,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const [selected, setSelected] = useState(0)
   const [variant, setVariant] = useState('focus')
   const [search, setSearch] = useState('')
-  const [cat, setCat] = useState('ALL')
+  const [cat, setCat] = useState('TOUS')
   const [weight, setWeight] = useState('')
   const [addedName, setAddedName] = useState(null)
   const [showEditor, setShowEditor] = useState(false)
@@ -58,12 +59,12 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const mapWO = (r) => ({
     woExId: r.id, day_exercise_id: r.day_exercise_id, name: r.name, group: r.muscle_group,
     sets: r.sets, reps: r.reps, weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video,
-    cues: r.cues || [], completed: r.completed,
+    cues: r.cues || [], description: r.description || '', pattern: r.pattern || '', completed: r.completed,
   })
   const mapDE = (r) => ({
     woExId: null, day_exercise_id: r.id, name: r.name, group: r.muscle_group,
     sets: r.sets, reps: r.reps, weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video,
-    cues: r.cues || [], completed: false,
+    cues: r.cues || [], description: r.description || '', pattern: r.pattern || '', completed: false,
   })
 
   // ---- load everything ----
@@ -122,7 +123,8 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
     if (list.length) {
       const rows = list.map((e, i) => ({
         workout_id: wo.id, user_id: uid, day_exercise_id: e.day_exercise_id ?? null, position: i,
-        name: e.name, muscle_group: e.group, sets: e.sets, reps: e.reps, weight: e.weight,
+        name: e.name, muscle_group: e.group, pattern: e.pattern || '', description: e.description || '',
+        sets: e.sets, reps: e.reps, weight: e.weight,
         rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, completed: e.completed,
       }))
       const { data } = await supabase.from('workout_exercises').insert(rows).select()
@@ -147,6 +149,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
     setTimeout(() => setAddedName(null), 1800)
     const newEx = {
       woExId: null, day_exercise_id: null, name: ex.name, group: ex.muscle_group,
+      pattern: ex.pattern || '', description: ex.description || '',
       sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—',
       rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], completed: false,
     }
@@ -155,6 +158,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
     if (!workoutId) { await createWorkout(nextList); return }
     const { data } = await supabase.from('workout_exercises').insert({
       workout_id: workoutId, user_id: uid, position: nextList.length - 1, name: newEx.name, muscle_group: newEx.group,
+      pattern: newEx.pattern, description: newEx.description,
       sets: newEx.sets, reps: newEx.reps, weight: newEx.weight, rest: newEx.rest, tempo: newEx.tempo, video: newEx.video, cues: newEx.cues, completed: false,
     }).select('id').single()
     setExercises((l) => l.map((e, idx) => (idx === l.length - 1 ? { ...e, woExId: data?.id ?? null } : e)))
@@ -170,7 +174,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
 
   const goTab = (t) => { setTab(t); setOverlay(null) }
   const openDetail = (i) => { setSelected(i); setOverlay('detail') }
-  const openAdd = () => { setOverlay('add'); setSearch(''); setCat('ALL') }
+  const openAdd = () => { setOverlay('add'); setSearch(''); setCat('TOUS') }
   const openLog = () => { setOverlay('logweight'); setWeight(weightHistory.length ? String(weightHistory[weightHistory.length - 1]) : (profile.bodyweight ? String(profile.bodyweight) : '')) }
   const closeOverlay = () => setOverlay(null)
 
@@ -223,16 +227,16 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const week = programDays.map((d) => {
     const st = d.weekday === wd ? 'today' : (weekDoneWeekdays.has(d.weekday) ? 'done' : (d.is_rest ? 'rest' : 'next'))
     return {
-      day: WEEKDAYS[d.weekday], focus: d.is_rest ? 'REST' : d.title,
+      day: WEEKDAYS[d.weekday], focus: d.is_rest ? 'REPOS' : d.title,
       dayColor: st === 'today' ? accent : (d.is_rest ? 'rgba(255,255,255,0.3)' : '#fff'),
       focusColor: d.is_rest ? 'rgba(255,255,255,0.3)' : (st === 'today' ? '#fff' : 'rgba(255,255,255,0.7)'),
       stateColor: st === 'today' ? accent : (st === 'done' ? accent : 'rgba(255,255,255,0.35)'),
-      stateLabel: st === 'today' ? 'TODAY' : (st === 'done' ? 'DONE' : (d.is_rest ? 'REST' : 'PLANNED')),
+      stateLabel: st === 'today' ? 'AUJ.' : (st === 'done' ? 'FAIT' : (d.is_rest ? 'REPOS' : 'PRÉVU')),
     }
   })
 
   const sel = exercises[selected] || exercises[0] || null
-  const sets = sel ? Array.from({ length: sel.sets }, (_, k) => ({ n: 'SET ' + (k + 1), reps: sel.reps, weight: sel.weight })) : []
+  const sets = sel ? Array.from({ length: sel.sets }, (_, k) => ({ n: 'SÉRIE ' + (k + 1), reps: sel.reps, weight: sel.weight })) : []
 
   // body weight chart (guard small histories)
   const hist = weightHistory
@@ -272,9 +276,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
   const sessions8wk = recentDates.length
 
   const progressTiles = [
-    { label: 'SESSIONS · 8WK', value: String(sessions8wk), unit: '' },
-    { label: 'THIS WEEK', value: String(sessionsThisWeek), unit: '' },
-    { label: 'DAY STREAK', value: String(streak), unit: '' },
+    { label: 'SÉANCES · 8SEM', value: String(sessions8wk), unit: '' },
+    { label: 'CETTE SEM.', value: String(sessionsThisWeek), unit: '' },
+    { label: 'JOURS DE SUITE', value: String(streak), unit: '' },
   ]
 
   const q = search.toLowerCase()
@@ -306,7 +310,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 26 }}>
                 <div>
                   <div style={{ font: "600 13px 'Barlow Condensed'", letterSpacing: 3, color: 'rgba(255,255,255,0.45)' }}>{dateLabel()}</div>
-                  <div style={{ fontFamily: c.bebas, fontSize: 46, lineHeight: 0.88, letterSpacing: 1, marginTop: 6 }}>READY TO<br />TRAIN, {name}</div>
+                  <div style={{ fontFamily: c.bebas, fontSize: 46, lineHeight: 0.88, letterSpacing: 1, marginTop: 6 }}>PRÊT À<br />T'ENTRAÎNER, {name}</div>
                 </div>
                 <div onClick={() => setOverlay('menu')} style={{ width: 46, height: 46, borderRadius: '50%', background: '#171717', border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: c.bebas, fontSize: 22, color: accent, flexShrink: 0, cursor: 'pointer' }}>{name.charAt(0)}</div>
               </div>
@@ -316,12 +320,12 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                 <div style={{ position: 'absolute', top: -40, right: -40, width: 180, height: 180, borderRadius: '50%', background: `radial-gradient(circle, ${accent} 0%, transparent 70%)`, opacity: 0.12 }} />
                 <div style={{ position: 'relative' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent }} />{isRest ? 'REST DAY' : "TODAY'S SESSION"}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: accent }} />{isRest ? 'JOUR DE REPOS' : 'SÉANCE DU JOUR'}</div>
                     <span style={{ fontFamily: c.bebas, fontSize: 22, color: 'rgba(255,255,255,0.3)' }}>→</span>
                   </div>
-                  <div style={{ fontFamily: c.bebas, fontSize: 60, lineHeight: 0.84, margin: '16px 0 8px' }}>{isRest ? 'RECOVER' : title}</div>
+                  <div style={{ fontFamily: c.bebas, fontSize: 60, lineHeight: 0.84, margin: '16px 0 8px' }}>{isRest ? 'RÉCUP' : title}</div>
                   <div style={{ font: "600 14px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.5)' }}>
-                    {isRest ? 'REST & RECOVER · MOBILITY OPTIONAL' : `${focus} · ${total} EXERCISES · ${sessionMin} MIN`}
+                    {isRest ? 'REPOS & RÉCUP · MOBILITÉ EN OPTION' : `${focus} · ${total} EXOS · ${sessionMin} MIN`}
                   </div>
                   {!isRest && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 22 }}>
@@ -329,9 +333,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                         <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
                           <div style={{ height: '100%', width: progressPctStr, background: accent, borderRadius: 3, transition: 'width .4s' }} />
                         </div>
-                        <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.5)', marginTop: 7 }}>{done}/{total} COMPLETED</div>
+                        <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.5)', marginTop: 7 }}>{done}/{total} TERMINÉS</div>
                       </div>
-                      <div style={{ background: accent, color: '#000', fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, padding: '11px 24px', borderRadius: 30 }}>START ▸</div>
+                      <div style={{ background: accent, color: '#000', fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, padding: '11px 24px', borderRadius: 30 }}>DÉMARRER ▸</div>
                     </div>
                   )}
                 </div>
@@ -339,15 +343,15 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
 
               {/* quick stats */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 28 }}>
-                <Stat value={String(sessionsThisWeek)} label="SESSIONS / WK" />
-                <Stat value={String(streak)} label="DAY STREAK" color={accent} />
-                <Stat value={bodyWeight ? bodyWeight.toFixed(1) : '—'} label="BODY KG" />
+                <Stat value={String(sessionsThisWeek)} label="SÉANCES / SEM" />
+                <Stat value={String(streak)} label="JOURS DE SUITE" color={accent} />
+                <Stat value={bodyWeight ? bodyWeight.toFixed(1) : '—'} label="POIDS KG" />
               </div>
 
               {/* this week */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 6 }}>
-                <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 1 }}>THIS WEEK</div>
-                <div onClick={() => setShowEditor(true)} style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: accent, cursor: 'pointer' }}>EDIT PROGRAM ›</div>
+                <div style={{ fontFamily: c.bebas, fontSize: 26, letterSpacing: 1 }}>CETTE SEMAINE</div>
+                <div onClick={() => setShowEditor(true)} style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 1.5, color: accent, cursor: 'pointer' }}>MODIFIER ›</div>
               </div>
               {week.map((d, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid ' + c.hair }}>
@@ -363,9 +367,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           {tab === 'train' && (
             <div style={{ padding: '60px 0 130px', animation: 'fadeUp .4s' }}>
               <div style={{ padding: '0 20px' }}>
-                <div style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}>{dateLabel()} · TODAY</div>
+                <div style={{ font: "700 12px 'Barlow Condensed'", letterSpacing: 2.5, color: accent }}>{dateLabel()} · AUJOURD'HUI</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 8 }}>
-                  <div style={{ fontFamily: c.bebas, fontSize: 54, lineHeight: 0.82 }}>{isRest && total === 0 ? 'REST' : titleLines.map((l, k) => <span key={k}>{l}{k < titleLines.length - 1 && <br />}</span>)}</div>
+                  <div style={{ fontFamily: c.bebas, fontSize: 54, lineHeight: 0.82 }}>{isRest && total === 0 ? 'REPOS' : titleLines.map((l, k) => <span key={k}>{l}{k < titleLines.length - 1 && <br />}</span>)}</div>
                   <svg width="78" height="78" viewBox="0 0 78 78" style={{ flexShrink: 0 }}>
                     <circle cx="39" cy="39" r="30" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="6" />
                     <circle cx="39" cy="39" r="30" fill="none" stroke={accent} strokeWidth="6" strokeLinecap="round" strokeDasharray={ringCirc.toFixed(1)} strokeDashoffset={ringOffset.toFixed(1)} transform="rotate(-90 39 39)" style={{ transition: 'stroke-dashoffset .5s' }} />
@@ -378,14 +382,14 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
               {total > 0 && (
                 <div style={{ display: 'flex', gap: 5, background: '#141414', borderRadius: 30, padding: 5, margin: '20px 20px', border: '1px solid ' + c.hair }}>
                   {['focus', 'list'].map((v) => (
-                    <div key={v} onClick={() => setVariant(v)} style={{ flex: 1, textAlign: 'center', padding: 9, borderRadius: 24, fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, cursor: 'pointer', background: variant === v ? accent : 'transparent', color: variant === v ? '#000' : 'rgba(255,255,255,0.5)', transition: 'all .2s' }}>{v.toUpperCase()}</div>
+                    <div key={v} onClick={() => setVariant(v)} style={{ flex: 1, textAlign: 'center', padding: 9, borderRadius: 24, fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, cursor: 'pointer', background: variant === v ? accent : 'transparent', color: variant === v ? '#000' : 'rgba(255,255,255,0.5)', transition: 'all .2s' }}>{v === 'focus' ? 'DÉTAIL' : 'LISTE'}</div>
                   ))}
                 </div>
               )}
 
               {total === 0 && (
                 <div style={{ padding: '30px 20px 6px', textAlign: 'center', font: "500 14px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>
-                  {isRest ? 'Scheduled rest day. Add moves to train anyway.' : 'No exercises yet. Add some to start.'}
+                  {isRest ? "Jour de repos prévu. Ajoute des exos pour t'entraîner quand même." : 'Aucun exercice. Ajoutes-en pour commencer.'}
                 </div>
               )}
 
@@ -402,9 +406,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                         <Check completed={ex.completed} accent={accent} size={38} onClick={(e) => { e.stopPropagation(); toggle(ex.i) }} />
                       </div>
                       <div style={{ display: 'flex', gap: 22, marginTop: 16, paddingTop: 14, borderTop: '1px solid ' + c.hair }}>
-                        <Metric value={ex.scheme} label="SETS × REPS" />
-                        <Metric value={ex.weight} label="LOAD" />
-                        <Metric value={ex.rest} label="REST" />
+                        <Metric value={ex.scheme} label="SÉRIES × RÉPS" />
+                        <Metric value={ex.weight} label="CHARGE" />
+                        <Metric value={ex.rest} label="REPOS" />
                       </div>
                     </div>
                   ))}
@@ -431,7 +435,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
               )}
 
               <div style={{ padding: '16px 20px 0' }}>
-                <div onClick={openAdd} style={{ border: '1.5px dashed rgba(255,255,255,0.2)', borderRadius: 16, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>+ ADD EXERCISE</div>
+                <div onClick={openAdd} style={{ border: '1.5px dashed rgba(255,255,255,0.2)', borderRadius: 16, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 20, letterSpacing: 1.5, color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>+ AJOUTER UN EXERCICE</div>
               </div>
             </div>
           )}
@@ -439,12 +443,12 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           {/* ============ STATS ============ */}
           {tab === 'stats' && (
             <div style={{ padding: '60px 20px 130px', animation: 'fadeUp .4s' }}>
-              <div style={{ fontFamily: c.bebas, fontSize: 46, lineHeight: 0.86, letterSpacing: 1, marginBottom: 22 }}>PROGRESS</div>
+              <div style={{ fontFamily: c.bebas, fontSize: 46, lineHeight: 0.86, letterSpacing: 1, marginBottom: 22 }}>PROGRESSION</div>
 
               <div style={{ background: '#101010', border: '1px solid ' + c.hair9, borderRadius: 22, padding: 22, marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint45 }}>BODY WEIGHT</div>
+                    <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint45 }}>POIDS DE CORPS</div>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
                       <span style={{ fontFamily: c.bebas, fontSize: 60, lineHeight: 0.8 }}>{bodyWeight ? bodyWeight.toFixed(1) : '—'}</span>
                       <span style={{ fontFamily: c.bebas, fontSize: 24, color: c.faint45 }}>KG</span>
@@ -453,7 +457,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                   {chartPts.length > 0 && (
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ font: "700 14px 'Barlow Condensed'", letterSpacing: 1, color: monthDeltaColor }}>{monthDeltaStr}</div>
-                      <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TREND</div>
+                      <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TENDANCE</div>
                     </div>
                   )}
                 </div>
@@ -464,9 +468,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                     <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="4.5" fill={accent} stroke="#101010" strokeWidth="2.5" />
                   </svg>
                 ) : (
-                  <div style={{ height: 90, marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "500 13px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>Log your first weigh-in to see the trend</div>
+                  <div style={{ height: 90, marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', font: "500 13px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>Note ta première pesée pour voir la tendance</div>
                 )}
-                <div onClick={openLog} style={{ marginTop: 16, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 30, padding: 11, textAlign: 'center', fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, cursor: 'pointer' }}>+ LOG WEIGHT</div>
+                <div onClick={openLog} style={{ marginTop: 16, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 30, padding: 11, textAlign: 'center', fontFamily: c.bebas, fontSize: 18, letterSpacing: 1.5, cursor: 'pointer' }}>+ AJOUTER UNE PESÉE</div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 24 }}>
@@ -481,7 +485,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                 ))}
               </div>
 
-              <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1, marginBottom: 12 }}>SESSIONS / WEEK</div>
+              <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1, marginBottom: 12 }}>SÉANCES / SEMAINE</div>
               <div style={{ background: '#141414', border: '1px solid ' + c.hair, borderRadius: 18, padding: '18px 16px 12px', marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 7, height: 90 }}>
                   {barViews.map((b, i) => (
@@ -494,8 +498,8 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
-                <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1 }}>PROGRESS PHOTOS</div>
-                <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TAP TO ADD</div>
+                <div style={{ fontFamily: c.bebas, fontSize: 24, letterSpacing: 1 }}>PHOTOS DE PROGRÈS</div>
+                <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>TOUCHE POUR AJOUTER</div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                 {['WK 1', 'WK 4', 'WK 8'].map((ph, i) => (<PhotoSlot key={i} label={ph} />))}
@@ -507,17 +511,17 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
         {/* ============ TOAST ============ */}
         {addedName && (
           <div style={{ position: 'absolute', left: 20, right: 20, bottom: 108, zIndex: 75, background: accent, color: '#000', borderRadius: 16, padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', animation: 'fadeUp .3s' }}>
-            <span style={{ fontFamily: c.bebas, fontSize: 18, letterSpacing: 1 }}>ADDED TO SESSION</span>
+            <span style={{ fontFamily: c.bebas, fontSize: 18, letterSpacing: 1 }}>AJOUTÉ À LA SÉANCE</span>
             <span style={{ font: "700 13px 'Barlow Condensed'", letterSpacing: 0.5 }}>{addedName}</span>
           </div>
         )}
 
         {/* ============ BOTTOM NAV ============ */}
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 70, background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '13px 36px 30px', display: 'flex', justifyContent: 'space-between' }}>
-          <NavItem onClick={() => goTab('home')} color={navColor('home')} label="HOME">
+          <NavItem onClick={() => goTab('home')} color={navColor('home')} label="ACCUEIL">
             <path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />
           </NavItem>
-          <NavItem onClick={() => goTab('train')} color={navColor('train')} label="TRAIN" cap>
+          <NavItem onClick={() => goTab('train')} color={navColor('train')} label="SÉANCE" cap>
             <line x1="4" y1="9" x2="4" y2="15" /><line x1="7" y1="6" x2="7" y2="18" /><line x1="17" y1="6" x2="17" y2="18" /><line x1="20" y1="9" x2="20" y2="15" /><line x1="7" y1="12" x2="17" y2="12" />
           </NavItem>
           <NavItem onClick={() => goTab('stats')} color={navColor('stats')} label="STATS" cap>
@@ -528,31 +532,40 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
         {/* ============ DETAIL OVERLAY ============ */}
         {overlay === 'detail' && sel && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 85, background: '#0A0A0A', overflowY: 'auto', animation: 'overlayIn .25s' }}>
-            <div style={{ position: 'relative', height: 270, background: 'repeating-linear-gradient(135deg,#141414,#141414 11px,#191919 11px,#191919 22px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div onClick={closeOverlay} style={{ position: 'absolute', top: 54, left: 18, width: 42, height: 42, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <div style={{ position: 'relative', height: 250, background: 'radial-gradient(circle at 50% 35%, #15170d 0%, #0d0d0d 70%)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid ' + c.hair9 }}>
+              <div onClick={closeOverlay} style={{ position: 'absolute', top: 54, left: 18, width: 42, height: 42, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 2 }}>
                 <BackArrow />
               </div>
-              <div style={{ width: 68, height: 68, borderRadius: '50%', background: accent, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
-                <svg width="24" height="26" viewBox="0 0 24 26"><path d="M2 2l20 11L2 24z" fill="#000" /></svg>
-              </div>
-              <div style={{ position: 'absolute', bottom: 16, left: 20, right: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: 'rgba(255,255,255,0.6)' }}>▶ FORM VIDEO</span>
-                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10, color: c.faint }}>{sel.video}</span>
-              </div>
+              <Schematic pattern={sel.pattern} accent={accent} />
+              <div style={{ position: 'absolute', bottom: 14, left: 20, right: 20, textAlign: 'center', font: "700 10px 'Barlow Condensed'", letterSpacing: 2.5, color: 'rgba(255,255,255,0.4)' }}>SCHÉMA DU MOUVEMENT</div>
             </div>
 
             <div style={{ padding: '22px 20px 130px' }}>
               <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: accent }}>{sel.group}</div>
               <div style={{ fontFamily: c.bebas, fontSize: 48, lineHeight: 0.86, letterSpacing: 0.5, marginTop: 4 }}>{sel.name}</div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginTop: 18 }}>
-                <KeyMetric value={String(sel.sets)} label="SETS" />
-                <KeyMetric value={sel.reps} label="REPS" />
-                <KeyMetric value={sel.weight} label="LOAD" />
+              <div onClick={() => ytSearch(sel.name)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, marginTop: 16, background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 30, padding: '13px', cursor: 'pointer' }}>
+                <span style={{ width: 26, height: 26, borderRadius: '50%', background: '#FF0000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <svg width="11" height="12" viewBox="0 0 11 12"><path d="M1 1l9 5-9 5z" fill="#fff" /></svg>
+                </span>
+                <span style={{ fontFamily: c.bebas, fontSize: 19, letterSpacing: 1 }}>VOIR LA DÉMO SUR YOUTUBE</span>
+              </div>
+
+              {sel.description && (
+                <>
+                  <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 8px' }}>EXPLICATION</div>
+                  <div style={{ font: "500 15px 'Barlow Condensed'", letterSpacing: 0.2, color: 'rgba(255,255,255,0.82)', lineHeight: 1.4 }}>{sel.description}</div>
+                </>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginTop: 20 }}>
+                <KeyMetric value={String(sel.sets)} label="SÉRIES" />
+                <KeyMetric value={sel.reps} label="RÉPS" />
+                <KeyMetric value={sel.weight} label="CHARGE" />
                 <KeyMetric value={sel.tempo} label="TEMPO" />
               </div>
 
-              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>SET LOG</div>
+              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>JOURNAL DES SÉRIES</div>
               <div style={{ background: '#141414', borderRadius: 16, overflow: 'hidden' }}>
                 {sets.map((st, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
@@ -564,7 +577,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                 ))}
               </div>
 
-              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>FORM CUES</div>
+              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>CONSEILS D'EXÉCUTION</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
                 {(sel.cues || []).map((cue, i) => (
                   <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
@@ -576,7 +589,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
             </div>
 
             <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 20px 30px', background: 'linear-gradient(transparent,#0A0A0A 30%)' }}>
-              <div onClick={() => toggle(selected)} style={{ background: sel.completed ? '#1c1c1c' : accent, color: sel.completed ? accent : '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>{sel.completed ? '✓ COMPLETED' : 'MARK COMPLETE'}</div>
+              <div onClick={() => toggle(selected)} style={{ background: sel.completed ? '#1c1c1c' : accent, color: sel.completed ? accent : '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>{sel.completed ? '✓ TERMINÉ' : 'MARQUER COMME FAIT'}</div>
             </div>
           </div>
         )}
@@ -589,9 +602,9 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
                 <div onClick={closeOverlay} style={{ width: 40, height: 40, borderRadius: '50%', background: '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
                   <BackArrow />
                 </div>
-                <div style={{ fontFamily: c.bebas, fontSize: 34, letterSpacing: 1 }}>ADD EXERCISE</div>
+                <div style={{ fontFamily: c.bebas, fontSize: 34, letterSpacing: 1 }}>AJOUTER UN EXERCICE</div>
               </div>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search exercises…" style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: "'Barlow Condensed'", fontSize: 16, outline: 'none' }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un exercice…" style={{ width: '100%', boxSizing: 'border-box', background: '#161616', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: '13px 16px', color: '#fff', fontFamily: "'Barlow Condensed'", fontSize: 16, outline: 'none' }} />
               <div style={{ display: 'flex', gap: 7, marginTop: 12, overflowX: 'auto', paddingBottom: 2 }}>
                 {chips.map((ch, i) => (
                   <div key={i} onClick={() => setCat(ch.label)} style={{ flexShrink: 0, padding: '7px 16px', borderRadius: 30, fontFamily: c.bebas, fontSize: 15, letterSpacing: 1, cursor: 'pointer', background: ch.bg, color: ch.color, border: '1px solid ' + ch.border }}>{ch.label}</div>
@@ -600,7 +613,7 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
             </div>
             <div style={{ padding: '8px 20px 40px' }}>
               {library.length === 0 && (
-                <div style={{ padding: '40px 0', textAlign: 'center', font: "500 14px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>NO EXERCISES FOUND</div>
+                <div style={{ padding: '40px 0', textAlign: 'center', font: "500 14px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>AUCUN EXERCICE TROUVÉ</div>
               )}
               {library.map((lib) => (
                 <div key={lib.id} onClick={() => addFromCatalog(lib)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '15px 0', borderBottom: '1px solid ' + c.hair7, cursor: 'pointer' }}>
@@ -622,12 +635,12 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
           <div onClick={closeOverlay} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end', animation: 'overlayIn .25s' }}>
             <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '24px 20px 40px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
               <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 20px' }} />
-              <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 1, marginBottom: 18 }}>LOG BODY WEIGHT</div>
+              <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 1, marginBottom: 18 }}>AJOUTER UNE PESÉE</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, background: '#0e0e0e', borderRadius: 16, padding: '18px 20px', marginBottom: 18 }}>
                 <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} autoFocus style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#fff', fontFamily: c.bebas, fontSize: 44, width: '100%' }} />
                 <span style={{ fontFamily: c.bebas, fontSize: 26, color: c.faint }}>KG</span>
               </div>
-              <div onClick={saveWeight} style={{ background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>SAVE ENTRY</div>
+              <div onClick={saveWeight} style={{ background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 22, letterSpacing: 2, cursor: 'pointer' }}>ENREGISTRER</div>
             </div>
           </div>
         )}
@@ -638,10 +651,10 @@ export default function MainApp({ session, profile, onProfileChange, onReonboard
             <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', boxSizing: 'border-box', background: '#161616', borderRadius: '26px 26px 0 0', padding: '24px 20px 40px', borderTop: '1px solid rgba(255,255,255,0.1)', animation: 'slideUp .3s' }}>
               <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '0 auto 18px' }} />
               <div style={{ font: "700 11px 'Barlow Condensed'", letterSpacing: 2, color: c.faint }}>{session.user.email}</div>
-              <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 0.5, marginTop: 2, marginBottom: 18 }}>{programName || 'NO PROGRAM'}</div>
-              <MenuRow label="EDIT PROGRAM" onClick={() => { setOverlay(null); setShowEditor(true) }} accent={accent} />
-              <MenuRow label="REBUILD WITH COACH" onClick={() => { setOverlay(null); onReonboard() }} accent={accent} />
-              <MenuRow label="SIGN OUT" onClick={onSignOut} danger />
+              <div style={{ fontFamily: c.bebas, fontSize: 30, letterSpacing: 0.5, marginTop: 2, marginBottom: 18 }}>{programName || 'AUCUN PROGRAMME'}</div>
+              <MenuRow label="MODIFIER LE PROGRAMME" onClick={() => { setOverlay(null); setShowEditor(true) }} accent={accent} />
+              <MenuRow label="REGÉNÉRER AVEC LE COACH" onClick={() => { setOverlay(null); onReonboard() }} accent={accent} />
+              <MenuRow label="DÉCONNEXION" onClick={onSignOut} danger />
             </div>
           </div>
         )}
@@ -703,6 +716,98 @@ function NavItem({ onClick, color, label, cap, children }) {
 }
 function BackArrow() {
   return <svg width="11" height="18" viewBox="0 0 11 18"><path d="M9 2L2 9l7 7" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+}
+
+// Original movement schematics, one per pattern. Abstract stick figure + motion arrow.
+function Schematic({ pattern, accent }) {
+  const w = 'rgba(255,255,255,0.55)'
+  const S = { fill: 'none', stroke: w, strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  const A = { fill: 'none', stroke: accent, strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  const head = (cx, cy) => <circle cx={cx} cy={cy} r="9" fill={w} />
+  const figs = {
+    squat: (
+      <g>
+        {head(70, 26)}
+        <path d="M70 35 L70 70" {...S} />
+        <path d="M70 70 L52 88 L52 110 M70 70 L88 88 L88 110" {...S} />
+        <path d="M70 48 L48 56 M70 48 L92 56" {...S} />
+        <path d="M120 40 L120 104 M112 52 L120 40 L128 52 M112 92 L120 104 L128 92" {...A} />
+      </g>
+    ),
+    hinge: (
+      <g>
+        {head(40, 40)}
+        <path d="M48 44 L92 64" {...S} />
+        <path d="M92 64 L92 112" {...S} />
+        <path d="M62 53 L60 92 M74 58 L74 92" {...S} />
+        <path d="M40 96 A56 56 0 0 1 116 70" {...A} />
+        <path d="M108 64 L116 70 L114 80" {...A} />
+      </g>
+    ),
+    push: (
+      <g>
+        {head(60, 60)}
+        <path d="M60 69 L60 112" {...S} />
+        <path d="M60 80 L40 96 M60 80 L40 64" {...S} />
+        <path d="M118 36 L118 96 M110 48 L118 36 L126 48" {...A} />
+        <path d="M70 76 L104 60" {...S} />
+      </g>
+    ),
+    pull: (
+      <g>
+        {head(80, 36)}
+        <path d="M80 45 L80 96 M80 60 L58 50 M80 60 L102 50" {...S} />
+        <path d="M80 96 L66 118 M80 96 L94 118" {...S} />
+        <path d="M30 30 L30 92 M22 80 L30 92 L38 80" {...A} />
+        <path d="M130 30 L130 92 M122 80 L130 92 L138 80" {...A} />
+      </g>
+    ),
+    lunge: (
+      <g>
+        {head(72, 26)}
+        <path d="M72 35 L72 72" {...S} />
+        <path d="M72 72 L44 92 L44 116 M72 72 L100 88 L100 116" {...S} />
+        <path d="M72 50 L54 60 M72 50 L90 60" {...S} />
+        <path d="M120 60 L120 108 M112 96 L120 108 L128 96" {...A} />
+      </g>
+    ),
+    calf: (
+      <g>
+        <path d="M60 30 L60 96" {...S} />
+        <path d="M60 96 L100 96 M60 96 L48 108" {...S} />
+        <path d="M110 30 L110 86 M102 42 L110 30 L118 42" {...A} />
+      </g>
+    ),
+    core: (
+      <g>
+        {head(80, 36)}
+        <path d="M80 45 L80 96" {...S} />
+        <path d="M80 60 L58 70 M80 60 L102 70" {...S} />
+        <path d="M80 96 L62 116 M80 96 L98 116" {...S} />
+        <path d="M48 70 A40 40 0 0 0 48 96" {...A} />
+        <path d="M112 70 A40 40 0 0 1 112 96" {...A} />
+      </g>
+    ),
+    conditioning: (
+      <g>
+        <path d="M86 20 L60 78 L84 78 L62 130" {...A} />
+        {head(40, 44)}
+        <path d="M40 53 L40 92 M40 66 L22 76 M40 92 L26 116 M40 92 L52 112" {...S} />
+      </g>
+    ),
+  }
+  const fig = figs[pattern] || (
+    <g>
+      <path d="M40 75 L120 75" {...S} />
+      <circle cx="40" cy="75" r="13" {...S} /><circle cx="120" cy="75" r="13" {...S} />
+    </g>
+  )
+  return (
+    <svg width="190" height="170" viewBox="0 0 160 150" style={{ overflow: 'visible' }}>
+      <line x1="20" y1="128" x2="140" y2="128" stroke="rgba(255,255,255,0.12)" strokeWidth="3" strokeLinecap="round" />
+      {fig}
+    </svg>
+  )
 }
 function MenuRow({ label, onClick, accent, danger }) {
   return (

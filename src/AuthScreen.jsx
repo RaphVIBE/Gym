@@ -15,21 +15,21 @@ export default function AuthScreen() {
 
   const submit = async () => {
     setError(''); setNotice('')
-    if (!email || !password) { setError('Enter your email and password.'); return }
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (!email || !password) { setError('Saisis ton e-mail et ton mot de passe.'); return }
+    if (password.length < 6) { setError('Le mot de passe doit faire au moins 6 caractères.'); return }
     setBusy(true)
     try {
       if (mode === 'signup') {
         const { data, error } = await supabase.auth.signUp({ email, password })
         if (error) throw error
-        if (!data.session) setNotice('Account created. Check your email to confirm, then sign in.')
+        if (!data.session) setNotice('Compte créé. Vérifie ta boîte mail pour confirmer, puis connecte-toi.')
         // if confirmation is off, onAuthStateChange signs the user straight in
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
       }
     } catch (e) {
-      setError(e.message || 'Something went wrong.')
+      setError(e.message || 'Une erreur est survenue.')
     } finally {
       setBusy(false)
     }
@@ -47,25 +47,25 @@ export default function AuthScreen() {
 
         <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 4, color: accent }}>PULSE GYM</div>
         <div style={{ fontFamily: c.bebas, fontSize: 56, lineHeight: 0.86, letterSpacing: 1, marginTop: 8, marginBottom: 30 }}>
-          {mode === 'login' ? <>WELCOME<br />BACK</> : <>BUILD YOUR<br />PROGRAM</>}
+          {mode === 'login' ? <>BON<br />RETOUR</> : <>CRÉE TON<br />PROGRAMME</>}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <input type="email" autoCapitalize="none" autoCorrect="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" style={field} />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" onKeyDown={(e) => e.key === 'Enter' && submit()} style={field} />
+          <input type="email" autoCapitalize="none" autoCorrect="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" style={field} />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mot de passe" onKeyDown={(e) => e.key === 'Enter' && submit()} style={field} />
         </div>
 
         {error && <div style={{ font: "600 13px 'Barlow Condensed'", color: '#FF5A3C', marginTop: 14 }}>{error}</div>}
         {notice && <div style={{ font: "600 13px 'Barlow Condensed'", color: accent, marginTop: 14 }}>{notice}</div>}
 
         <div onClick={busy ? undefined : submit} style={{ marginTop: 22, background: accent, color: '#000', borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 24, letterSpacing: 2, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>
-          {busy ? 'PLEASE WAIT…' : (mode === 'login' ? 'SIGN IN ▸' : 'CREATE ACCOUNT ▸')}
+          {busy ? 'PATIENTE…' : (mode === 'login' ? 'SE CONNECTER ▸' : 'CRÉER UN COMPTE ▸')}
         </div>
 
         <div style={{ textAlign: 'center', marginTop: 22, font: "600 13px 'Barlow Condensed'", letterSpacing: 0.5, color: c.faint }}>
-          {mode === 'login' ? "New here? " : 'Already have an account? '}
+          {mode === 'login' ? 'Nouveau ici ? ' : 'Déjà un compte ? '}
           <span onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setNotice('') }} style={{ color: accent, cursor: 'pointer', fontWeight: 700 }}>
-            {mode === 'login' ? 'Create one' : 'Sign in'}
+            {mode === 'login' ? 'Créer un compte' : 'Se connecter'}
           </span>
         </div>
       </div>

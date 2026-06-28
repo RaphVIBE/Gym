@@ -7,34 +7,34 @@ import { generateProgram, persistProgram } from './coach.js'
 const accent = ACCENT_DEFAULT
 
 const STEPS = [
-  { key: 'display_name', kind: 'text', q: 'WHAT SHOULD WE\nCALL YOU?', placeholder: 'Your name' },
-  { key: 'age', kind: 'number', q: 'HOW OLD\nARE YOU?', unit: 'YEARS', min: 14, max: 90 },
-  { key: 'bodyweight', kind: 'number', q: 'YOUR BODY\nWEIGHT?', unit: 'KG', min: 35, max: 220, decimal: true },
-  { key: 'goal', kind: 'single', q: "WHAT'S YOUR\nMAIN GOAL?", options: [
-    { v: 'strength', l: 'STRENGTH', d: 'Get stronger, lift heavier' },
-    { v: 'hypertrophy', l: 'BUILD MUSCLE', d: 'Size and definition' },
-    { v: 'fat_loss', l: 'LOSE FAT', d: 'Lean out — higher reps + conditioning' },
-    { v: 'conditioning', l: 'CONDITIONING', d: 'Engine and work capacity' },
-    { v: 'general', l: 'GENERAL FITNESS', d: 'Balanced, feel good' },
+  { key: 'display_name', kind: 'text', q: "COMMENT\nT'APPELLE-T-ON ?", placeholder: 'Ton prénom' },
+  { key: 'age', kind: 'number', q: 'QUEL ÂGE\nAS-TU ?', unit: 'ANS', min: 14, max: 90 },
+  { key: 'bodyweight', kind: 'number', q: 'TON POIDS\nDE CORPS ?', unit: 'KG', min: 35, max: 220, decimal: true },
+  { key: 'goal', kind: 'single', q: 'QUEL EST TON\nOBJECTIF ?', options: [
+    { v: 'strength', l: 'FORCE', d: 'Devenir plus fort, soulever lourd' },
+    { v: 'hypertrophy', l: 'PRENDRE DU MUSCLE', d: 'Volume et définition' },
+    { v: 'fat_loss', l: 'PERDRE DU GRAS', d: "S'affiner — plus de réps + cardio" },
+    { v: 'conditioning', l: 'CARDIO / CONDITION', d: 'Souffle et capacité de travail' },
+    { v: 'general', l: 'FORME GÉNÉRALE', d: 'Équilibré, se sentir bien' },
   ] },
-  { key: 'experience', kind: 'single', q: 'HOW MUCH\nEXPERIENCE?', options: [
-    { v: 'beginner', l: 'BEGINNER', d: 'New or returning to training' },
-    { v: 'intermediate', l: 'INTERMEDIATE', d: 'A year or two under the bar' },
-    { v: 'advanced', l: 'ADVANCED', d: 'Several years, confident' },
+  { key: 'experience', kind: 'single', q: 'TON\nNIVEAU ?', options: [
+    { v: 'beginner', l: 'DÉBUTANT', d: 'Nouveau ou de retour' },
+    { v: 'intermediate', l: 'INTERMÉDIAIRE', d: 'Un à deux ans de pratique' },
+    { v: 'advanced', l: 'AVANCÉ', d: "Plusieurs années, à l'aise" },
   ] },
-  { key: 'days_per_week', kind: 'chips', q: 'HOW MANY DAYS\nA WEEK?', options: [2, 3, 4, 5, 6], suffix: '' },
-  { key: 'session_minutes', kind: 'chips', q: 'TIME PER\nSESSION?', options: [30, 45, 60, 75], suffix: ' MIN' },
-  { key: 'equipment', kind: 'single', q: 'WHAT DO YOU\nTRAIN WITH?', options: [
-    { v: 'full_gym', l: 'FULL GYM', d: 'Barbells, machines, cables' },
-    { v: 'dumbbells', l: 'DUMBBELLS', d: 'Adjustable or fixed dumbbells' },
-    { v: 'home', l: 'HOME SETUP', d: 'Dumbbells + bodyweight' },
-    { v: 'bodyweight', l: 'BODYWEIGHT', d: 'No equipment needed' },
+  { key: 'days_per_week', kind: 'chips', q: 'COMBIEN DE JOURS\nPAR SEMAINE ?', options: [2, 3, 4, 5, 6], suffix: '' },
+  { key: 'session_minutes', kind: 'chips', q: 'TEMPS PAR\nSÉANCE ?', options: [30, 45, 60, 75], suffix: ' MIN' },
+  { key: 'equipment', kind: 'single', q: 'AVEC QUEL\nMATÉRIEL ?', options: [
+    { v: 'full_gym', l: 'SALLE COMPLÈTE', d: 'Barres, machines, poulies' },
+    { v: 'dumbbells', l: 'HALTÈRES', d: 'Haltères réglables ou fixes' },
+    { v: 'home', l: 'À LA MAISON', d: 'Haltères + poids du corps' },
+    { v: 'bodyweight', l: 'POIDS DU CORPS', d: 'Aucun matériel' },
   ] },
-  { key: 'avoid', kind: 'multi', q: 'ANYTHING TO\nWORK AROUND?', options: [
-    { v: 'none', l: 'NOTHING — GO FULL SEND', names: [] },
-    { v: 'back', l: 'SENSITIVE LOWER BACK', names: ['conventional deadlift'] },
-    { v: 'knees', l: 'SENSITIVE KNEES', names: ['bulgarian split squat', 'reverse lunge', 'walking lunge', 'step-up', 'hack squat'] },
-    { v: 'shoulders', l: 'SENSITIVE SHOULDERS', names: ['overhead press', 'dips', 'dumbbell shoulder press'] },
+  { key: 'avoid', kind: 'multi', q: 'QUELQUE CHOSE\nÀ MÉNAGER ?', options: [
+    { v: 'none', l: 'RIEN — À FOND', names: [] },
+    { v: 'back', l: 'BAS DU DOS SENSIBLE', names: ['soulevé de terre'] },
+    { v: 'knees', l: 'GENOUX SENSIBLES', names: ['squat bulgare', 'fentes arrière', 'fentes marchées', 'montées sur banc', 'squat hack'] },
+    { v: 'shoulders', l: 'ÉPAULES SENSIBLES', names: ['développé militaire', 'dips', 'développé épaules haltères'] },
   ] },
 ]
 
@@ -100,7 +100,7 @@ export default function Onboarding({ session, profile, onDone }) {
       if (uErr) throw uErr
       onDone(updated)
     } catch (e) {
-      setErr(e.message || 'Could not build your program.')
+      setErr(e.message || 'Impossible de créer ton programme.')
       setBuilding(false)
     }
   }
@@ -110,8 +110,8 @@ export default function Onboarding({ session, profile, onDone }) {
       <PhoneFrame>
         <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 30, textAlign: 'center' }}>
           <div style={{ width: 40, height: 40, borderRadius: '50%', border: '4px solid rgba(255,255,255,0.15)', borderTopColor: accent, animation: 'spin .8s linear infinite' }} />
-          <div style={{ fontFamily: c.bebas, fontSize: 38, lineHeight: 0.9, letterSpacing: 1 }}>BUILDING YOUR<br />PROGRAM</div>
-          <div style={{ font: "600 12px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>Matching exercises to your profile…</div>
+          <div style={{ fontFamily: c.bebas, fontSize: 38, lineHeight: 0.9, letterSpacing: 1 }}>CRÉATION DE TON<br />PROGRAMME</div>
+          <div style={{ font: "600 12px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>On adapte les exercices à ton profil…</div>
           {err && <div style={{ font: "600 13px 'Barlow Condensed'", color: '#FF5A3C' }}>{err}</div>}
         </div>
       </PhoneFrame>
@@ -200,7 +200,7 @@ export default function Onboarding({ session, profile, onDone }) {
         </div>
 
         <div onClick={next} style={{ marginTop: 18, background: valid() ? accent : '#1c1c1c', color: valid() ? '#000' : c.faint, borderRadius: 30, padding: 16, textAlign: 'center', fontFamily: c.bebas, fontSize: 24, letterSpacing: 2, cursor: valid() ? 'pointer' : 'default' }}>
-          {step < STEPS.length - 1 ? 'NEXT ▸' : 'BUILD MY PROGRAM ▸'}
+          {step < STEPS.length - 1 ? 'SUIVANT ▸' : 'CRÉER MON PROGRAMME ▸'}
         </div>
       </div>
     </PhoneFrame>
