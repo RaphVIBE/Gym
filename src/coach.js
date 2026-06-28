@@ -201,6 +201,39 @@ export async function persistProgram(supabase, userId, program) {
 export { WEEKDAY_LABELS }
 
 // ---- quick / express sessions (started ad-hoc on the day) ----
+// ---- warmup & cooldown, suggested from what the session works ----
+const hasPattern = (list, pats) => list.some((e) => pats.includes(e.pattern))
+
+export function warmupItem(list) {
+  const cues = [
+    '2–3 min de cardio léger (corde, vélo ou marche rapide)',
+    'Mobilité articulaire : épaules, hanches, chevilles',
+  ]
+  if (hasPattern(list, ['squat', 'hinge', 'lunge', 'calf'])) cues.push('10 squats au poids du corps + fentes dynamiques')
+  if (hasPattern(list, ['push'])) cues.push("Rotations d'épaules + 10 pompes faciles")
+  if (hasPattern(list, ['pull'])) cues.push('Activation du dos : bandes ou tractions assistées')
+  cues.push('1 à 2 séries légères sur ton premier exercice')
+  return {
+    day_exercise_id: null, name: 'ÉCHAUFFEMENT', group: 'PRÉPARATION', muscle_group: 'PRÉPARATION', pattern: 'warmup',
+    description: 'Prépare le corps et réduit le risque de blessure. À faire avant chaque séance.',
+    sets: 1, reps: '5–8 min', weight: 'BW', rest: '—', tempo: '', video: 'échauffement musculation', cues,
+  }
+}
+
+export function cooldownItem(list) {
+  const cues = ['Retour au calme : 2 min de respiration et marche lente']
+  if (hasPattern(list, ['squat', 'hinge', 'lunge', 'calf'])) cues.push('Étire quadriceps, ischios, fessiers et mollets (30 s chacun)')
+  if (hasPattern(list, ['push'])) cues.push('Étire pectoraux (cadre de porte) et épaules')
+  if (hasPattern(list, ['pull'])) cues.push('Étire dorsaux, biceps et avant-bras')
+  if (hasPattern(list, ['core'])) cues.push('Étirement abdos en position cobra')
+  cues.push('Tiens chaque étirement 20–30 s, sans à-coups')
+  return {
+    day_exercise_id: null, name: 'ÉTIREMENTS', group: 'RETOUR AU CALME', muscle_group: 'RETOUR AU CALME', pattern: 'cooldown',
+    description: 'Améliore la souplesse et la récupération. À faire en fin de séance.',
+    sets: 1, reps: '5 min', weight: 'BW', rest: '—', tempo: '', video: 'étirements après musculation', cues,
+  }
+}
+
 export const QUICK_LABELS = {
   short: 'SÉANCE COURTE',
   legs: 'FOCUS JAMBES',

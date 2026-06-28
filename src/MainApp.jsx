@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c, ACCENT_DEFAULT, WEEKDAYS, todayWeekday, localDateStr, dateLabel } from './theme.js'
-import { quickSession, QUICK_LABELS } from './coach.js'
+import { quickSession, QUICK_LABELS, warmupItem, cooldownItem } from './coach.js'
 import ProgramEditor from './ProgramEditor.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
@@ -162,7 +162,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       .insert({ user_id: uid, program_day_id: programDayId ?? null, title, performed_on: todayStr })
       .select('id').single()
     if (!wo) return
-    const norm = list.map((e, i) => ({
+    const full = [warmupItem(list), ...list, cooldownItem(list)] // warmup first, stretch last — always
+    const norm = full.map((e, i) => ({
       day_exercise_id: e.day_exercise_id ?? null, name: e.name, group: e.group ?? e.muscle_group,
       pattern: e.pattern || '', description: e.description || '', sets: e.sets, reps: e.reps,
       weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues || [], position: i,
@@ -246,16 +247,26 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     setTimeout(() => setAddedName(null), 1800)
     const w0 = ex.equipment === 'bodyweight' ? 'BW' : '—'
     const sl = buildSetLog(3, ex.default_reps, w0)
+    // keep the stretch block last: insert before a trailing cooldown
+    const lastIsCd = exercises.length > 0 && exercises[exercises.length - 1].pattern === 'cooldown'
+    const insertIdx = lastIsCd ? exercises.length - 1 : exercises.length
     const { data } = await supabase.from('workout_exercises').insert({
-      workout_id: workoutId, user_id: uid, position: exercises.length, name: ex.name, muscle_group: ex.muscle_group,
+      workout_id: workoutId, user_id: uid, position: insertIdx, name: ex.name, muscle_group: ex.muscle_group,
       pattern: ex.pattern || '', description: ex.description || '',
       sets: 3, reps: ex.default_reps, weight: w0, rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], set_log: sl, completed: false,
     }).select('id').single()
-    setExercises((l) => [...l, {
+    const newEx = {
       woExId: data?.id ?? null, day_exercise_id: null, name: ex.name, group: ex.muscle_group, pattern: ex.pattern || '',
       description: ex.description || '', sets: 3, reps: ex.default_reps, weight: w0,
       rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], setLog: sl, completed: false,
-    }])
+    }
+    if (lastIsCd) {
+      const cd = exercises[exercises.length - 1]
+      if (cd.woExId) supabase.from('workout_exercises').update({ position: insertIdx + 1 }).eq('id', cd.woExId).then(() => {})
+      setExercises((l) => { const copy = l.slice(); copy.splice(copy.length - 1, 0, newEx); return copy })
+    } else {
+      setExercises((l) => [...l, newEx])
+    }
   }
 
   const saveWeight = async () => {
@@ -288,7 +299,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     if (!sessionDayId) return
     setOverlay(null)
     await supabase.from('day_exercises').delete().eq('program_day_id', sessionDayId)
-    const rows = exercises.map((e, i) => ({
+    // warmup/cooldown are auto per session, never saved into the program template
+    const rows = exercises.filter((e) => e.pattern !== 'warmup' && e.pattern !== 'cooldown').map((e, i) => ({
       program_day_id: sessionDayId, user_id: uid, position: i, exercise_id: null,
       name: e.name, muscle_group: e.group, pattern: e.pattern || '', description: e.description || '',
       sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues,
@@ -388,6 +400,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   })
 
   const sel = exercises[selected] || exercises[0] || null
+  const isPrep = !!(sel && (sel.pattern === 'warmup' || sel.pattern === 'cooldown'))
   const selSetLog = sel ? (sel.setLog && sel.setLog.length ? sel.setLog : buildSetLog(sel.sets, sel.reps, sel.weight)) : []
   const cellInput = { width: 74, boxSizing: 'border-box', background: '#0e0e0e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 6px', color: '#fff', fontFamily: c.bebas, fontSize: 18, textAlign: 'center', outline: 'none' }
   const otherPending = exercises.filter((e, i) => i !== selected && !e.completed).length
@@ -618,9 +631,18 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                             <Check completed={ex.completed} accent={accent} size={38} onClick={(e) => { e.stopPropagation(); toggle(ex.i) }} />
                           </div>
                           <div style={{ display: 'flex', gap: 22, marginTop: 16, paddingTop: 14, borderTop: '1px solid ' + c.hair }}>
-                            <Metric value={ex.scheme} label="SÉRIES × RÉPS" />
-                            <Metric value={ex.weight} label="CHARGE" />
-                            <Metric value={ex.rest} label="REPOS" />
+                            {(ex.pattern === 'warmup' || ex.pattern === 'cooldown') ? (
+                              <>
+                                <Metric value={ex.reps} label="DURÉE" />
+                                <Metric value={`${(ex.cues || []).length} mvts`} label="ROUTINE" />
+                              </>
+                            ) : (
+                              <>
+                                <Metric value={ex.scheme} label="SÉRIES × RÉPS" />
+                                <Metric value={ex.weight} label="CHARGE" />
+                                <Metric value={ex.rest} label="REPOS" />
+                              </>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -637,8 +659,14 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                             <div style={{ font: "500 11px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint, marginTop: 2 }}>{ex.group}</div>
                           </div>
                           <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                            <div style={{ fontFamily: c.bebas, fontSize: 23, lineHeight: 0.9 }}>{ex.scheme}</div>
-                            <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>{ex.weight}</div>
+                            {(ex.pattern === 'warmup' || ex.pattern === 'cooldown') ? (
+                              <div style={{ fontFamily: c.bebas, fontSize: 20, lineHeight: 0.9 }}>{ex.reps}</div>
+                            ) : (
+                              <>
+                                <div style={{ fontFamily: c.bebas, fontSize: 23, lineHeight: 0.9 }}>{ex.scheme}</div>
+                                <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>{ex.weight}</div>
+                              </>
+                            )}
                           </div>
                           <span style={{ fontFamily: c.bebas, fontSize: 18, color: 'rgba(255,255,255,0.25)', flexShrink: 0 }}>›</span>
                         </div>
@@ -907,42 +935,53 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                 </>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginTop: 20 }}>
-                <KeyMetric value={String(sel.sets)} label="SÉRIES" />
-                <KeyMetric value={sel.reps} label="RÉPS" />
-                <KeyMetric value={sel.weight} label="CHARGE" />
-                <KeyMetric value={sel.tempo} label="TEMPO" />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', margin: '24px 0 8px' }}>
-                <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1 }}>JOURNAL DES SÉRIES</div>
-                <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>NOTE TES CHARGES</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px 8px' }}>
-                <div style={{ flex: 1, font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>SÉRIE</div>
-                <div style={{ width: 74, textAlign: 'center', font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>RÉPS</div>
-                <div style={{ width: 74, textAlign: 'center', font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>POIDS</div>
-                <div style={{ width: 30 }} />
-              </div>
-              <div style={{ background: '#141414', borderRadius: 16, overflow: 'hidden' }}>
-                {selSetLog.map((st, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ flex: 1, font: "700 14px 'Barlow Condensed'", letterSpacing: 1, color: st.done ? accent : 'rgba(255,255,255,0.55)' }}>SÉRIE {i + 1}</div>
-                    <input value={st.reps ?? ''} onChange={(e) => setSetField(selected, i, 'reps', e.target.value, false)} onBlur={() => persistExercise(selected)} style={cellInput} />
-                    <input value={st.weight ?? ''} onChange={(e) => setSetField(selected, i, 'weight', e.target.value, false)} onBlur={() => persistExercise(selected)} style={cellInput} />
-                    <div onClick={() => setSetField(selected, i, 'done', !st.done, true)} style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: st.done ? accent : 'transparent', border: '1.5px solid ' + (st.done ? accent : 'rgba(255,255,255,0.2)') }}>
-                      {st.done && <svg width="15" height="15" viewBox="0 0 18 18"><path d="M3 9.5l4 4 8-9" fill="none" stroke="#000" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                    </div>
+              {!isPrep && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginTop: 20 }}>
+                    <KeyMetric value={String(sel.sets)} label="SÉRIES" />
+                    <KeyMetric value={sel.reps} label="RÉPS" />
+                    <KeyMetric value={sel.weight} label="CHARGE" />
+                    <KeyMetric value={sel.tempo} label="TEMPO" />
                   </div>
-                ))}
-              </div>
 
-              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-                <div onClick={() => removeSet(selected)} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '11px', fontFamily: c.bebas, fontSize: 17, letterSpacing: 1, color: selSetLog.length > 1 ? '#fff' : 'rgba(255,255,255,0.25)', cursor: selSetLog.length > 1 ? 'pointer' : 'default' }}>− SÉRIE</div>
-                <div onClick={() => addSet(selected)} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '11px', fontFamily: c.bebas, fontSize: 17, letterSpacing: 1, color: accent, cursor: 'pointer' }}>+ SÉRIE (INTENSIFIER)</div>
-              </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', margin: '24px 0 8px' }}>
+                    <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1 }}>JOURNAL DES SÉRIES</div>
+                    <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>NOTE TES CHARGES</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px 8px' }}>
+                    <div style={{ flex: 1, font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>SÉRIE</div>
+                    <div style={{ width: 74, textAlign: 'center', font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>RÉPS</div>
+                    <div style={{ width: 74, textAlign: 'center', font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>POIDS</div>
+                    <div style={{ width: 30 }} />
+                  </div>
+                  <div style={{ background: '#141414', borderRadius: 16, overflow: 'hidden' }}>
+                    {selSetLog.map((st, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ flex: 1, font: "700 14px 'Barlow Condensed'", letterSpacing: 1, color: st.done ? accent : 'rgba(255,255,255,0.55)' }}>SÉRIE {i + 1}</div>
+                        <input value={st.reps ?? ''} onChange={(e) => setSetField(selected, i, 'reps', e.target.value, false)} onBlur={() => persistExercise(selected)} style={cellInput} />
+                        <input value={st.weight ?? ''} onChange={(e) => setSetField(selected, i, 'weight', e.target.value, false)} onBlur={() => persistExercise(selected)} style={cellInput} />
+                        <div onClick={() => setSetField(selected, i, 'done', !st.done, true)} style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: st.done ? accent : 'transparent', border: '1.5px solid ' + (st.done ? accent : 'rgba(255,255,255,0.2)') }}>
+                          {st.done && <svg width="15" height="15" viewBox="0 0 18 18"><path d="M3 9.5l4 4 8-9" fill="none" stroke="#000" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
 
-              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>CONSEILS D'EXÉCUTION</div>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                    <div onClick={() => removeSet(selected)} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '11px', fontFamily: c.bebas, fontSize: 17, letterSpacing: 1, color: selSetLog.length > 1 ? '#fff' : 'rgba(255,255,255,0.25)', cursor: selSetLog.length > 1 ? 'pointer' : 'default' }}>− SÉRIE</div>
+                    <div onClick={() => addSet(selected)} style={{ flex: 1, textAlign: 'center', background: '#1c1c1c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '11px', fontFamily: c.bebas, fontSize: 17, letterSpacing: 1, color: accent, cursor: 'pointer' }}>+ SÉRIE (INTENSIFIER)</div>
+                  </div>
+                </>
+              )}
+
+              {isPrep && (
+                <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, marginTop: 20, background: '#141414', border: '1px solid ' + c.hair9, borderRadius: 12, padding: '10px 16px' }}>
+                  <span style={{ fontFamily: c.bebas, fontSize: 26 }}>{sel.reps}</span>
+                  <span style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>DURÉE INDICATIVE</span>
+                </div>
+              )}
+
+              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>{isPrep ? 'ROUTINE' : "CONSEILS D'EXÉCUTION"}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
                 {(sel.cues || []).map((cue, i) => (
                   <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
@@ -1136,7 +1175,7 @@ function NavItem({ onClick, color, label, cap, children }) {
   return (
     <div onClick={onClick} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer', color }}>
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap={cap ? 'round' : undefined}>{children}</svg>
-      <span style={{ font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: 'currentColor' }}>{label}</span>
+      <span style={{ font: "700 9px 'Barlow Condensed'", letterSpacing: 1, whiteSpace: 'nowrap', color: 'currentColor' }}>{label}</span>
     </div>
   )
 }
@@ -1219,6 +1258,23 @@ function Schematic({ pattern, accent }) {
         <path d="M86 20 L60 78 L84 78 L62 130" {...A} />
         {head(40, 44)}
         <path d="M40 53 L40 92 M40 66 L22 76 M40 92 L26 116 M40 92 L52 112" {...S} />
+      </g>
+    ),
+    warmup: (
+      <g>
+        {head(80, 30)}
+        <path d="M80 39 L80 86 M80 52 L60 44 M80 52 L100 44 M80 86 L66 116 M80 86 L94 116" {...S} />
+        <path d="M44 64 A34 34 0 1 1 40 92" {...A} />
+        <path d="M33 88 L40 96 L48 88" {...A} />
+      </g>
+    ),
+    cooldown: (
+      <g>
+        {head(54, 50)}
+        <path d="M58 56 L92 78" {...S} />
+        <path d="M92 78 L92 116" {...S} />
+        <path d="M60 64 L48 96 M74 70 L70 100" {...S} />
+        <path d="M118 56 L118 104 M110 92 L118 104 L126 92" {...A} />
       </g>
     ),
   }

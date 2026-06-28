@@ -1,10 +1,23 @@
+:root { color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body {
   margin: 0;
   background: #0A0A0A;
   font-family: 'Barlow Condensed', sans-serif;
+  /* native-app feel */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  overscroll-behavior: none;
 }
+
+/* text entry stays selectable */
+input, textarea { -webkit-user-select: text; user-select: text; }
+
 *::-webkit-scrollbar { display: none; }
 * { scrollbar-width: none; }
 
@@ -17,3 +30,16 @@ body {
 input::placeholder { color: rgba(255,255,255,0.35); }
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* visible keyboard focus (inputs set inline outline:none; box-shadow isn't overridden) */
+input:focus-visible, textarea:focus-visible { box-shadow: 0 0 0 2px rgba(217,255,0,0.55); }
+
+/* honour reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
