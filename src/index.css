@@ -1,0 +1,17 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #1a1a1a;
+  font-family: 'Barlow Condensed', sans-serif;
+}
+*::-webkit-scrollbar { display: none; }
+* { scrollbar-width: none; }
+
+@keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+@keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+@keyframes popIn { 0% { transform:scale(0.4); opacity:0; } 60% { transform:scale(1.12); } 100% { transform:scale(1); opacity:1; } }
+@keyframes overlayIn { from { opacity:0; } to { opacity:1; } }
+
+input::placeholder { color: rgba(255,255,255,0.35); }
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
