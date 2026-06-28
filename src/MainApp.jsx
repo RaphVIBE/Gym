@@ -18,6 +18,8 @@ const EXPRESS = [
 ]
 const ytSearch = (n) => window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(n + ' technique musculation'), '_blank', 'noopener')
 
+const buildSetLog = (count, reps, weight) => Array.from({ length: Math.max(0, count || 0) }, () => ({ reps, weight, done: false }))
+
 function weekRange(d = new Date()) {
   const wd = todayWeekday(d)
   const mon = new Date(d); mon.setDate(d.getDate() - wd); mon.setHours(0, 0, 0, 0)
@@ -69,6 +71,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     woExId: r.id, day_exercise_id: r.day_exercise_id, name: r.name, group: r.muscle_group,
     sets: r.sets, reps: r.reps, weight: r.weight, rest: r.rest, tempo: r.tempo, video: r.video,
     cues: r.cues || [], description: r.description || '', pattern: r.pattern || '', completed: r.completed,
+    setLog: Array.isArray(r.set_log) && r.set_log.length ? r.set_log : buildSetLog(r.sets, r.reps, r.weight),
   })
   const planFromDE = (r) => ({
     day_exercise_id: r.id, name: r.name, group: r.muscle_group, pattern: r.pattern || '', description: r.description || '',
@@ -144,7 +147,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
       const rows = norm.map((e) => ({
         workout_id: wo.id, user_id: uid, day_exercise_id: e.day_exercise_id, position: e.position,
         name: e.name, muscle_group: e.group, pattern: e.pattern, description: e.description,
-        sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, completed: false,
+        sets: e.sets, reps: e.reps, weight: e.weight, rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues,
+        set_log: buildSetLog(e.sets, e.reps, e.weight), completed: false,
       }))
       const { data } = await supabase.from('workout_exercises').insert(rows).select()
       created = (data || []).slice().sort((x, y) => x.position - y.position)
@@ -154,7 +158,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
     setExercises(norm.map((e, i) => ({
       woExId: created[i]?.id ?? null, day_exercise_id: e.day_exercise_id, name: e.name, group: e.group,
       pattern: e.pattern, description: e.description, sets: e.sets, reps: e.reps, weight: e.weight,
-      rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, completed: false,
+      rest: e.rest, tempo: e.tempo, video: e.video, cues: e.cues, setLog: buildSetLog(e.sets, e.reps, e.weight), completed: false,
     })))
     setRecentDates((d) => (d.includes(todayStr) ? d : [...d, todayStr]))
     setVariant('focus'); setOverlay(null); setTab('train')
@@ -164,24 +168,42 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const startQuick = (kind) => startSession(quickSession(kind, profile, catalog), QUICK_LABELS[kind], null)
 
   const toggle = async (i) => {
-    const nextList = exercises.map((e, k) => (k === i ? { ...e, completed: !e.completed } : e))
-    setExercises(nextList)
-    const ex = nextList[i]
-    if (ex.woExId) await supabase.from('workout_exercises').update({ completed: ex.completed }).eq('id', ex.woExId)
+    const ex = exercises[i]
+    if (!ex) return
+    const next = !ex.completed
+    const setLog = (ex.setLog || []).map((s) => ({ ...s, done: next }))
+    setExercises((list) => list.map((e, k) => (k === i ? { ...e, completed: next, setLog } : e)))
+    if (ex.woExId) await supabase.from('workout_exercises').update({ completed: next, set_log: setLog }).eq('id', ex.woExId)
+  }
+
+  // ---- per-set logging (reps + load) ----
+  const setSetField = (exIndex, setIndex, field, value, persist) => {
+    const ex = exercises[exIndex]
+    if (!ex) return
+    const setLog = (ex.setLog || []).map((s, k) => (k === setIndex ? { ...s, [field]: value } : s))
+    const completed = setLog.length > 0 && setLog.every((s) => s.done)
+    setExercises((list) => list.map((e, i) => (i === exIndex ? { ...e, setLog, completed } : e)))
+    if (persist && ex.woExId) supabase.from('workout_exercises').update({ set_log: setLog, completed }).eq('id', ex.woExId).then(() => {})
+  }
+  const persistExercise = (exIndex) => {
+    const e = exercises[exIndex]
+    if (e?.woExId) supabase.from('workout_exercises').update({ set_log: e.setLog, completed: e.completed }).eq('id', e.woExId).then(() => {})
   }
 
   const addFromCatalog = async (ex) => {
     setOverlay(null); setAddedName(ex.name)
     setTimeout(() => setAddedName(null), 1800)
+    const w0 = ex.equipment === 'bodyweight' ? 'BW' : '—'
+    const sl = buildSetLog(3, ex.default_reps, w0)
     const { data } = await supabase.from('workout_exercises').insert({
       workout_id: workoutId, user_id: uid, position: exercises.length, name: ex.name, muscle_group: ex.muscle_group,
       pattern: ex.pattern || '', description: ex.description || '',
-      sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—', rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], completed: false,
+      sets: 3, reps: ex.default_reps, weight: w0, rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], set_log: sl, completed: false,
     }).select('id').single()
     setExercises((l) => [...l, {
       woExId: data?.id ?? null, day_exercise_id: null, name: ex.name, group: ex.muscle_group, pattern: ex.pattern || '',
-      description: ex.description || '', sets: 3, reps: ex.default_reps, weight: ex.equipment === 'bodyweight' ? 'BW' : '—',
-      rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], completed: false,
+      description: ex.description || '', sets: 3, reps: ex.default_reps, weight: w0,
+      rest: '1:30', tempo: '2-1-1', video: ex.name, cues: ex.cues || [], setLog: sl, completed: false,
     }])
   }
 
@@ -256,7 +278,8 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   })
 
   const sel = exercises[selected] || exercises[0] || null
-  const sets = sel ? Array.from({ length: sel.sets }, (_, k) => ({ n: 'SÉRIE ' + (k + 1), reps: sel.reps, weight: sel.weight })) : []
+  const selSetLog = sel ? (sel.setLog && sel.setLog.length ? sel.setLog : buildSetLog(sel.sets, sel.reps, sel.weight)) : []
+  const cellInput = { width: 74, boxSizing: 'border-box', background: '#0e0e0e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 6px', color: '#fff', fontFamily: c.bebas, fontSize: 18, textAlign: 'center', outline: 'none' }
 
   const hist = weightHistory
   const bodyWeight = hist.length ? hist[hist.length - 1] : (profile.bodyweight || 0)
@@ -641,14 +664,25 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
                 <KeyMetric value={sel.tempo} label="TEMPO" />
               </div>
 
-              <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1, margin: '24px 0 10px' }}>JOURNAL DES SÉRIES</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', margin: '24px 0 8px' }}>
+                <div style={{ fontFamily: c.bebas, fontSize: 22, letterSpacing: 1 }}>JOURNAL DES SÉRIES</div>
+                <div style={{ font: "600 10px 'Barlow Condensed'", letterSpacing: 1, color: c.faint }}>NOTE TES CHARGES</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px 8px' }}>
+                <div style={{ flex: 1, font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>SÉRIE</div>
+                <div style={{ width: 74, textAlign: 'center', font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>RÉPS</div>
+                <div style={{ width: 74, textAlign: 'center', font: "700 9px 'Barlow Condensed'", letterSpacing: 1.5, color: c.faint }}>POIDS</div>
+                <div style={{ width: 30 }} />
+              </div>
               <div style={{ background: '#141414', borderRadius: 16, overflow: 'hidden' }}>
-                {sets.map((st, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '13px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ flex: 1, font: "700 13px 'Barlow Condensed'", letterSpacing: 1.5, color: 'rgba(255,255,255,0.55)' }}>{st.n}</div>
-                    <div style={{ width: 80, textAlign: 'center', fontFamily: c.bebas, fontSize: 20 }}>{st.reps}</div>
-                    <div style={{ width: 80, textAlign: 'center', fontFamily: c.bebas, fontSize: 20 }}>{st.weight}</div>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, border: '1.5px solid rgba(255,255,255,0.18)', flexShrink: 0 }} />
+                {selSetLog.map((st, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ flex: 1, font: "700 14px 'Barlow Condensed'", letterSpacing: 1, color: st.done ? accent : 'rgba(255,255,255,0.55)' }}>SÉRIE {i + 1}</div>
+                    <input value={st.reps ?? ''} onChange={(e) => setSetField(selected, i, 'reps', e.target.value, false)} onBlur={() => persistExercise(selected)} style={cellInput} />
+                    <input value={st.weight ?? ''} onChange={(e) => setSetField(selected, i, 'weight', e.target.value, false)} onBlur={() => persistExercise(selected)} style={cellInput} />
+                    <div onClick={() => setSetField(selected, i, 'done', !st.done, true)} style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: st.done ? accent : 'transparent', border: '1.5px solid ' + (st.done ? accent : 'rgba(255,255,255,0.2)') }}>
+                      {st.done && <svg width="15" height="15" viewBox="0 0 18 18"><path d="M3 9.5l4 4 8-9" fill="none" stroke="#000" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    </div>
                   </div>
                 ))}
               </div>
