@@ -19,9 +19,73 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Boot splash. Inlined on purpose: this has to paint and beat before the
+       JS bundle (and src/index.css with it) has loaded. It mirrors the
+       .pulse-mark block in src/index.css — keep the two in sync. -->
+  <style>
+    #boot {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      background: #0A0A0A;
+      transition: opacity .28s ease-out;
+    }
+    #boot[hidden] { display: none; }
+    #boot.boot--done { opacity: 0; }
+    #boot .boot__label {
+      font: 600 11px/1 'Barlow Condensed', system-ui, sans-serif;
+      letter-spacing: 2.5px; color: rgba(255,255,255,0.4);
+    }
+    .pulse-mark { display: block; }
+    .pulse-mark svg { display: block; overflow: visible; }
+    .pulse-mark path {
+      fill: none; stroke: var(--pulse-accent, #D9FF00);
+      stroke-width: 7; stroke-linecap: round; stroke-linejoin: round;
+    }
+    .pulse-mark__track { opacity: 0.18; }
+    .pulse-mark__trace {
+      stroke-dasharray: 22 100; stroke-dashoffset: 22;
+      filter: drop-shadow(0 0 var(--pulse-glow, 5px) var(--pulse-accent, #D9FF00));
+    }
+    .pulse-mark--beating { animation: pulseThump 1.4s ease-out infinite; }
+    .pulse-mark--beating .pulse-mark__trace { animation: pulseTrace 1.4s linear infinite; }
+    @keyframes pulseTrace {
+      0%   { stroke-dashoffset: 22;   opacity: 0; }
+      6%   { opacity: 1; }
+      60%  { stroke-dashoffset: -100; opacity: 1; }
+      74%  { stroke-dashoffset: -100; opacity: 0; }
+      100% { stroke-dashoffset: -100; opacity: 0; }
+    }
+    @keyframes pulseThump {
+      0%, 13%   { transform: scale(1); }
+      19%       { transform: scale(1.08); }
+      29%       { transform: scale(0.975); }
+      42%, 100% { transform: scale(1); }
+    }
+    @keyframes pulseBreathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) {
+      #boot { transition: none; }
+      .pulse-mark--beating { animation: none; }
+      .pulse-mark--beating .pulse-mark__trace {
+        animation: pulseBreathe 2s ease-in-out infinite;
+        stroke-dasharray: none; stroke-dashoffset: 0;
+      }
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
+
+  <!-- Removed by src/main.jsx once React has painted its own splash. -->
+  <div id="boot" role="status" aria-label="Chargement">
+    <div class="pulse-mark pulse-mark--beating" style="width:132px;height:62px;--pulse-glow:6px">
+      <svg viewBox="0 0 120 56" width="132" height="62" fill="none" aria-hidden="true">
+        <path class="pulse-mark__track" d="M4 28H38L48 9L59 48L69 20L75 28H116" pathLength="100" />
+        <path class="pulse-mark__trace" d="M4 28H38L48 9L59 48L69 20L75 28H116" pathLength="100" />
+      </svg>
+    </div>
+    <div class="boot__label">CHARGEMENT</div>
+  </div>
   <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>

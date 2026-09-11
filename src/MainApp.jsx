@@ -4,6 +4,7 @@ import { supabase } from './supabase.js'
 import { c, ACCENT_DEFAULT, WEEKDAYS, todayWeekday, localDateStr, dateLabel } from './theme.js'
 import { quickSession, QUICK_LABELS, warmupItem, cooldownItem } from './coach.js'
 import ProgramEditor from './ProgramEditor.jsx'
+import PulseLoader from './PulseLoader.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = {
@@ -335,10 +336,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   if (loading) {
     return (
       <PhoneFrame>
-        <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-          <div style={{ fontFamily: c.bebas, fontSize: 40, letterSpacing: 2, color: accent }}>PULSE</div>
-          <div style={{ width: 26, height: 26, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: accent, animation: 'spin .8s linear infinite' }} />
-        </div>
+        <PulseLoader accent={accent} label="CHARGEMENT" />
       </PhoneFrame>
     )
   }

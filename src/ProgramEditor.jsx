@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c } from './theme.js'
+import PulseLoader from './PulseLoader.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'] }
@@ -97,9 +98,7 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
   if (loading) {
     return (
       <PhoneFrame>
-        <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 26, height: 26, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: accent, animation: 'spin .8s linear infinite' }} />
-        </div>
+        <PulseLoader accent={accent} label="" size={96} />
       </PhoneFrame>
     )
   }
