@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import { BREATH_MS } from './PulseLoader.jsx'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -27,6 +28,9 @@ if (boot) {
     boot.addEventListener('transitionend', drop, { once: true })
     setTimeout(drop, 600)
   }
-  requestAnimationFrame(() => requestAnimationFrame(dismiss))
-  setTimeout(dismiss, 250)
+  // Hand over only once the mark has finished a full stroke, counted from page
+  // load — so the launch never cuts the beat mid-sweep on a fast connection.
+  const handOver = () => setTimeout(dismiss, Math.max(0, BREATH_MS - performance.now()))
+  requestAnimationFrame(() => requestAnimationFrame(handOver))
+  setTimeout(handOver, 250)
 }

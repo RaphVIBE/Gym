@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c } from './theme.js'
-import PulseLoader from './PulseLoader.jsx'
+import PulseLoader, { useBreath } from './PulseLoader.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'] }
@@ -10,6 +10,7 @@ const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squ
 // A program is just a set of sessions (A, B, C…), each an ordered list of exercises.
 export default function ProgramEditor({ uid, accent, programId, catalog, onClose, onReonboard }) {
   const [loading, setLoading] = useState(true)
+  const showLoader = useBreath(loading)
   const [name, setName] = useState('')
   const [sessions, setSessions] = useState([])
   const [picker, setPicker] = useState(null) // { sessionId }
@@ -95,10 +96,10 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
     ])
   }
 
-  if (loading) {
+  if (loading || showLoader) {
     return (
       <PhoneFrame>
-        <PulseLoader accent={accent} label="" size={96} />
+        {showLoader && <PulseLoader accent={accent} label="" size={96} />}
       </PhoneFrame>
     )
   }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { ACCENT_DEFAULT } from './theme.js'
-import PulseLoader from './PulseLoader.jsx'
+import PulseLoader, { useBreath } from './PulseLoader.jsx'
 import AuthScreen from './AuthScreen.jsx'
 import Onboarding from './Onboarding.jsx'
 import MainApp from './MainApp.jsx'
@@ -45,9 +45,13 @@ export default function App() {
     return () => { active = false }
   }, [session])
 
-  if (session === undefined) return <Splash />
+  const booting = session === undefined || (!!session && (profileLoading || !profile))
+  const showSplash = useBreath(booting)
+
+  // An empty frame while the loader is still under its anti-flash delay: same
+  // black background, so a fast resolve shows nothing at all.
+  if (booting) return showSplash ? <Splash /> : <PhoneFrame />
   if (!session) return <AuthScreen />
-  if (profileLoading || !profile) return <Splash />
   if (!profile.onboarded) {
     return <Onboarding session={session} profile={profile} onDone={(p) => setProfile(p)} />
   }

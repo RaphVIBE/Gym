@@ -4,7 +4,7 @@ import { supabase } from './supabase.js'
 import { c, ACCENT_DEFAULT, WEEKDAYS, todayWeekday, localDateStr, dateLabel } from './theme.js'
 import { quickSession, QUICK_LABELS, warmupItem, cooldownItem } from './coach.js'
 import ProgramEditor from './ProgramEditor.jsx'
-import PulseLoader from './PulseLoader.jsx'
+import PulseLoader, { useBreath } from './PulseLoader.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = {
@@ -50,6 +50,7 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const [addedName, setAddedName] = useState(null)
   const [showEditor, setShowEditor] = useState(false)
   const [loading, setLoading] = useState(true)
+  const showLoader = useBreath(loading)
   const [reloadKey, setReloadKey] = useState(0)
 
   const [programId, setProgramId] = useState(null)
@@ -333,10 +334,10 @@ export default function MainApp({ session, profile, onReonboard, onSignOut }) {
   const openLog = () => { setOverlay('logweight'); setWeight(weightHistory.length ? String(weightHistory[weightHistory.length - 1]) : (profile.bodyweight ? String(profile.bodyweight) : '')) }
   const closeOverlay = () => setOverlay(null)
 
-  if (loading) {
+  if (loading || showLoader) {
     return (
       <PhoneFrame>
-        <PulseLoader accent={accent} label="CHARGEMENT" />
+        {showLoader && <PulseLoader accent={accent} label="CHARGEMENT" />}
       </PhoneFrame>
     )
   }

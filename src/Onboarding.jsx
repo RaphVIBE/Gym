@@ -3,7 +3,7 @@ import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c, ACCENT_DEFAULT } from './theme.js'
 import { generateProgram, persistProgram } from './coach.js'
-import { PulseMark } from './PulseLoader.jsx'
+import { PulseMark, useBreath } from './PulseLoader.jsx'
 
 const accent = ACCENT_DEFAULT
 
@@ -42,6 +42,7 @@ const STEPS = [
 export default function Onboarding({ session, profile, onDone }) {
   const [step, setStep] = useState(0)
   const [building, setBuilding] = useState(false)
+  const showBuilding = useBreath(building, { delay: 0 })
   const [err, setErr] = useState('')
   const [a, setA] = useState({
     display_name: profile.display_name || '',
@@ -106,7 +107,7 @@ export default function Onboarding({ session, profile, onDone }) {
     }
   }
 
-  if (building) {
+  if (building || showBuilding) {
     return (
       <PhoneFrame>
         <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 30, textAlign: 'center' }}>
