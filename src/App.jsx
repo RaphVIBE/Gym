@@ -1,19 +1,16 @@
 import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
-import { c, ACCENT_DEFAULT } from './theme.js'
+import { ACCENT_DEFAULT } from './theme.js'
+import PulseLoader, { useBreath } from './PulseLoader.jsx'
 import AuthScreen from './AuthScreen.jsx'
 import Onboarding from './Onboarding.jsx'
 import MainApp from './MainApp.jsx'
 
-function Splash({ text = 'LOADING' }) {
+function Splash({ text = 'CHARGEMENT' }) {
   return (
     <PhoneFrame>
-      <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-        <div style={{ fontFamily: c.bebas, fontSize: 40, letterSpacing: 2, color: ACCENT_DEFAULT }}>PULSE</div>
-        <div style={{ width: 26, height: 26, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: ACCENT_DEFAULT, animation: 'spin .8s linear infinite' }} />
-        <div style={{ font: "600 11px 'Barlow Condensed'", letterSpacing: 2, color: 'rgba(255,255,255,0.4)' }}>{text}</div>
-      </div>
+      <PulseLoader accent={ACCENT_DEFAULT} label={text} />
     </PhoneFrame>
   )
 }
@@ -48,9 +45,13 @@ export default function App() {
     return () => { active = false }
   }, [session])
 
-  if (session === undefined) return <Splash />
+  const booting = session === undefined || (!!session && (profileLoading || !profile))
+  const showSplash = useBreath(booting)
+
+  // An empty frame while the loader is still under its anti-flash delay: same
+  // black background, so a fast resolve shows nothing at all.
+  if (booting) return showSplash ? <Splash /> : <PhoneFrame />
   if (!session) return <AuthScreen />
-  if (profileLoading || !profile) return <Splash />
   if (!profile.onboarded) {
     return <Onboarding session={session} profile={profile} onDone={(p) => setProfile(p)} />
   }

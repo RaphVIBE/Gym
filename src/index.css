@@ -25,7 +25,46 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
 @keyframes popIn { 0% { transform:scale(0.4); opacity:0; } 60% { transform:scale(1.12); } 100% { transform:scale(1); opacity:1; } }
 @keyframes overlayIn { from { opacity:0; } to { opacity:1; } }
-@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Pulse mark ------------------------------------------------------- */
+/* The simplified logo (src/PulseLoader.jsx) beating as a loading indicator.
+   The boot splash in index.html inlines a copy of this block so the beat is
+   already running before the bundle lands — keep the two in sync. */
+.pulse-mark { display: block; }
+.pulse-mark svg { display: block; overflow: visible; }
+.pulse-mark path {
+  fill: none;
+  stroke: var(--pulse-accent, #D9FF00);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pulse-mark__track { opacity: 0.18; }
+.pulse-mark__trace {
+  stroke-dasharray: 22 100;
+  stroke-dashoffset: 22;
+  filter: drop-shadow(0 0 var(--pulse-glow, 5px) var(--pulse-accent, #D9FF00));
+}
+.pulse-mark--beating { animation: pulseThump 1.4s ease-out infinite; }
+.pulse-mark--beating .pulse-mark__trace { animation: pulseTrace 1.4s linear infinite; }
+
+/* The trace sweeps the full path, then the line rests before the next beat. */
+@keyframes pulseTrace {
+  0%   { stroke-dashoffset: 22;   opacity: 0; }
+  6%   { opacity: 1; }
+  60%  { stroke-dashoffset: -100; opacity: 1; }
+  74%  { stroke-dashoffset: -100; opacity: 0; }
+  100% { stroke-dashoffset: -100; opacity: 0; }
+}
+/* Timed off pulseTrace: the head hits the spike at ~15% and the trough at
+   ~27% of the cycle, so the mark lifts and drops with its own waveform. */
+@keyframes pulseThump {
+  0%, 13%   { transform: scale(1); }
+  19%       { transform: scale(1.08); }
+  29%       { transform: scale(0.975); }
+  42%, 100% { transform: scale(1); }
+}
+@keyframes pulseBreathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 
 input::placeholder { color: rgba(255,255,255,0.35); }
 input[type=number]::-webkit-inner-spin-button,
@@ -41,5 +80,16 @@ input:focus-visible, textarea:focus-visible { box-shadow: 0 0 0 2px rgba(217,255
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Reduced motion: the loader still needs to signal activity, so the beat
+   degrades to a fade on the mark itself (no sweep, no scale). */
+@media (prefers-reduced-motion: reduce) {
+  .pulse-mark--beating { animation: none !important; }
+  .pulse-mark--beating .pulse-mark__trace {
+    animation: pulseBreathe 2s ease-in-out infinite !important;
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
   }
 }

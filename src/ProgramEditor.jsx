@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import PhoneFrame from './PhoneFrame.jsx'
 import { supabase } from './supabase.js'
 import { c } from './theme.js'
+import PulseLoader, { useBreath } from './PulseLoader.jsx'
 
 const CAT_CHIPS = ['TOUS', 'POUSSÉE', 'TIRAGE', 'JAMBES', 'ABDOS', 'CARDIO']
 const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squat', 'hinge', 'lunge', 'calf'], 'ABDOS': ['core'], 'CARDIO': ['conditioning'] }
@@ -9,6 +10,7 @@ const CAT_PATTERNS = { 'POUSSÉE': ['push'], 'TIRAGE': ['pull'], 'JAMBES': ['squ
 // A program is just a set of sessions (A, B, C…), each an ordered list of exercises.
 export default function ProgramEditor({ uid, accent, programId, catalog, onClose, onReonboard }) {
   const [loading, setLoading] = useState(true)
+  const showLoader = useBreath(loading)
   const [name, setName] = useState('')
   const [sessions, setSessions] = useState([])
   const [picker, setPicker] = useState(null) // { sessionId }
@@ -94,12 +96,10 @@ export default function ProgramEditor({ uid, accent, programId, catalog, onClose
     ])
   }
 
-  if (loading) {
+  if (loading || showLoader) {
     return (
       <PhoneFrame>
-        <div style={{ height: '100%', background: '#0A0A0A', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 26, height: 26, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: accent, animation: 'spin .8s linear infinite' }} />
-        </div>
+        {showLoader && <PulseLoader accent={accent} label="" size={96} />}
       </PhoneFrame>
     )
   }

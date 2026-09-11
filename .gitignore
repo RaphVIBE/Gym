@@ -4,3 +4,6 @@ dist
 *.local
 .env
 .netlify
+
+# les worktrees vivent sous .claude/ — deploy.command fait `git add -A`
+.claude/worktrees
